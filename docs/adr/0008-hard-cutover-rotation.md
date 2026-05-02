@@ -1,0 +1,3 @@
+# Hard-cutover credential rotation, no grace-period overlap
+
+Every rotation flow (Host SSH, VM admin SSH, PVE API token, age key, Service secret) removes the old credential immediately after verifying the new one — there is no grace-period overlap. Tracking "which entities are mid-rotation" is its own state machine; at single-operator scale, with Proxmox console as the recovery path, "before / after" beats "during". Recovery from a botched rotation is via Proxmox console for Hosts, reprovision for VMs, or out-of-band ceremony for PVE tokens and age keys. The same shape threads through every rotation playbook.

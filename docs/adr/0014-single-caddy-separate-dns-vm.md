@@ -1,0 +1,3 @@
+# Single Caddy ingress VM, separate Pi-hole+Unbound DNS VM
+
+There is exactly one Caddy VM, terminating TLS via Let's Encrypt DNS-01 (Cloudflare) and reverse-proxying every `*.fearn.cloud` Service. DNS (Pi-hole + Unbound) lives on its own VM. Ingress and DNS have different criticality (DNS-down breaks everything; ingress-down only breaks HTTP) and different lifecycles (Pi-hole's blocklist updates aren't an ingress concern); having one IP for all `*.fearn.cloud` records gives one place to look for HTTP routing. `just ingress-regenerate` writes both the Caddyfile and the Pi-hole local-DNS records from a single iteration over the Service inventory.

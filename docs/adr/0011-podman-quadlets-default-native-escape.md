@@ -1,0 +1,3 @@
+# Podman Quadlets default, native package as escape hatch
+
+Services default to Podman Quadlets — systemd units generated from container declarations, no daemon, journald-integrated logging, native systemd dependency ordering. A `deploy.type: native` escape hatch (apt package + systemd unit) is available for cases genuinely better not containerised; Caddy is the canonical example. Quadlets give `systemctl status` ergonomics and `Requires=`/`After=` ordering for free without forcing every Go single-binary into a container for consistency's sake. The Service yaml schema branches on substrate; multi-container layouts are first-class in the Quadlet renderer.
