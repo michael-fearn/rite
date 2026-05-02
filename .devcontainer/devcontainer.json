@@ -1,0 +1,26 @@
+{
+  "name": "fortress2",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/fortress2",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/fortress2,type=bind,consistency=cached",
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "SHELL": "/bin/bash"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash",
+            "args": ["-l"]
+          }
+        }
+      }
+    }
+  }
+}
