@@ -46,7 +46,7 @@ The deliverable of this PRD is the set of building blocks needed to make all of 
 
 5. As the operator, I want the bootstrap command to refuse re-runs if the host is already bootstrapped, so that I cannot accidentally clobber a working credential.
 
-6. As the operator, I want one command to apply the full host configuration (repos, hygiene, network bridges, storage registration, datacenter config, PVE users with multiple roles, GPU passthrough setup), so that bringing a host to a usable state is one operation rather than many.
+6. As the operator, I want one command to apply the full host configuration (repos, hygiene, explicitly managed network bridges, PVE users with multiple roles, GPU passthrough setup), so that bringing a host to a usable state is one operation rather than many.
 
 7. As the operator, I want host configuration to be idempotent and re-runnable, so that I can converge the host to the declared state at any time without worrying about side effects.
 
@@ -176,7 +176,7 @@ The deliverable of this PRD is the set of building blocks needed to make all of 
 
 61. As the operator, I want JSON Schema validation per inventory file, so that shape errors are caught at edit time.
 
-62. As the operator, I want cross-file validation (referenced VM exists, no port collisions, no duplicate hostnames, NFS export references resolve), so that errors that span files are caught before deploy.
+62. As the operator, I want cross-file validation (referenced VM exists, no port collisions, no duplicate hostnames, NFS export references resolve, VM disk storage exists on the placed host, VM bridge exists on the placed host), so that errors that span files are caught before deploy.
 
 63. As the operator, I want a decryption health check that verifies every encrypted file in the repo can be decrypted with the current age recipients, so that a misconfigured `.sops.yaml` rule cannot silently produce undecryptable files.
 

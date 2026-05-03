@@ -21,7 +21,7 @@ OpenTofu reads the same VM yaml files Ansible uses; provider aliases come from t
 - [ ] `just vm-up vm=<name>` runs prepare → tofu apply (with explicit plan approval) → configure
 - [ ] `just vm-destroy vm=<name>` runs `tofu destroy` and removes the encrypted secrets file
 - [ ] `vm-destroy` refuses if any service yaml references the VM
-- [ ] PVE token rotation uses versioned names so rotations are atomic on the PVE side
+- [ ] Tofu wrapper reads the current versioned PVE token produced by Host Configure; token rotation itself remains in the rotation workflow
 - [ ] `runbooks/new-vm.md` written
 - [ ] Demo: provision a test VM end-to-end on wintermute, destroy cleanly
 

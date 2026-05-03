@@ -104,7 +104,6 @@ fortress/
 │   ├── proxmox_repos/
 │   ├── system_hygiene/
 │   ├── proxmox_network/
-│   ├── proxmox_storage/
 │   ├── proxmox_users/
 │   ├── proxmox_gpu/
 │   ├── nfs_mounts/
@@ -153,23 +152,26 @@ The core pattern: every managed entity (host, VM, service, template) is a flat p
 
 ```yaml
 # inventory/hosts/raptor.sops.yaml
-ssh_root_key:
-  type: ed25519
-  created: 2026-05-01T12:00:00Z
-  rotation: 1
-  public_key: "ssh-ed25519 AAAA..."
-  private_key: |-
-    -----BEGIN OPENSSH PRIVATE KEY-----
-    ...
+ssh_keys:
+  bootstrap:
+    type: host_ssh
+    created: 2026-05-01T12:00:00Z
+    public_key: "ssh-ed25519 AAAA..."
+    private_key: |-
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...
 pve_api_tokens:
   tofu:
+    type: pve_api_token
+    token_id: tofu-v1
     version: 1                              # incremented on rotation
+    created: 2026-05-01T12:05:00Z
     value: "<token-secret>"
 ```
 
-The `rotation` and `version` integer fields support hard-cutover rotation policy (no grace-period overlap; old key/token gone immediately after new is verified).
+The `ssh_keys.bootstrap` shape is the canonical Host SSH key shape. `pve_api_tokens.tofu.version` supports hard-cutover rotation policy (no grace-period overlap; old tokens gone immediately after the new token is verified).
 
-**Globals** (`inventory/group_vars/all.yaml`) hold defaults that can be overridden per-host or per-vm. Examples: `domain: fearn.cloud`, `timezone`, `ntp_servers`, `dns_resolvers`, `vm_admin_user`, NAS topology, UID/GID convention, apt_repos.
+**Globals** (`inventory/group_vars/all.yaml`) hold defaults and fleet-wide policy that can be overridden per-host or per-vm. Examples: `domain: fearn.cloud`, `timezone`, `ntp_servers`, `dns_resolvers`, `vm_admin_user`, NAS topology, UID/GID convention, apt_repos, and reusable Proxmox role definitions.
 
 ---
 
@@ -216,7 +218,7 @@ Two decrypt patterns, both wrapped in operator-facing commands:
 
 1. Install Proxmox 9 manually via ISO.
 2. Drop the shared bootstrap key into `/root/.ssh/authorized_keys`. Path on workstation: documented constant (e.g., `~/.ssh/fortress_bootstrap`), referenced by `host-bootstrap.yml`.
-3. Manually create any storage pools (ZFS, LVM-thin, etc.). **Ansible only registers existing pools** in `storage.cfg`; it does not create pools (per design — storage operations are operator-controlled).
+3. Manually create and register any storage pools (ZFS, LVM-thin, directory storage, etc.). Storage remains operator-controlled and documented; Host Configure does not automate storage registration.
 4. Create `inventory/hosts/<host>.yaml` filling out the schema.
 
 ### 7.2. Bootstrap (`host-bootstrap.yml`)
@@ -229,7 +231,7 @@ One-shot transition from shared key to per-host key:
 4. Push public key to `/root/.ssh/authorized_keys`.
 5. **Verify** the new key works by opening a second SSH connection. **Mandatory** — failure here aborts before removing the shared key.
 6. Remove the shared key from `authorized_keys`.
-7. Write the SOPS file with the structured `ssh_root_key:` block.
+7. Write the SOPS file with the structured `ssh_keys.bootstrap` block.
 8. Delete the controller-side tempfile holding the unencrypted private key.
 
 If step 6 fails post-verify (extremely unlikely), recovery is via Proxmox console (web UI / IPMI / direct console).
@@ -241,12 +243,82 @@ Idempotent, re-runnable. Scope:
 - Proxmox repos (remove enterprise repo, add no-subscription, kill subscription nag).
 - System hygiene (hostname, `/etc/hosts`, NTP, timezone, base apt packages).
 - Proxmox network bridges beyond the install-default `vmbr0` (additional `vmbrN`, VLAN-aware mode, MTU).
-- Storage pool registration in `storage.cfg` (pools themselves created by operator — see §7.1.3).
-- `datacenter.cfg` and `storage.cfg` settings.
+- Storage documentation checks only; storage pool creation and `storage.cfg` registration remain operator-controlled for now.
 - PVE users + ACL bindings + API tokens. Tokens written to SOPS with versioned naming (e.g., `tofu-v1`). Multi-role support per user.
 - GPU passthrough kernel cmdline + vfio modules + initramfs (see §11). **Reboot policy: never auto-reboot**; ansible reports "reboot required" and the operator reboots deliberately.
 
-**Out of scope (deferred)**: PVE/host firewall, monitoring agents, ZFS pool creation. Backup config (vzdump schedules) is in scope as part of PBS integration (§12).
+Reusable Proxmox role definitions live in `inventory/group_vars/all.yaml`; Host YAML declares Host-specific users, token names, ACL paths, and role bindings. This keeps fleet permission policy in one place while leaving the Host declaration responsible for which identities exist on that Host.
+
+```yaml
+# inventory/group_vars/all.yaml
+proxmox:
+  roles:
+    fortress_tofu_vm_lifecycle:
+      privileges:
+        - VM.Allocate
+        - VM.Audit
+        - VM.Clone
+        - VM.Config.CDROM
+        - VM.Config.CPU
+        - VM.Config.Disk
+        - VM.Config.Memory
+        - VM.Config.Network
+        - VM.Config.Options
+        - VM.Monitor
+        - VM.PowerMgmt
+        - Datastore.AllocateSpace
+        - Datastore.Audit
+        - Sys.Audit
+```
+
+```yaml
+# inventory/hosts/raptor.yaml
+proxmox:
+  users:
+    - userid: tofu@pve
+      tokens:
+        - name: tofu
+          role: fortress_tofu_vm_lifecycle
+          path: /
+          privsep: true
+```
+
+PVE API tokens are always privilege-separated. Configure binds ACLs to the full token identity (for example, `tofu@pve!tofu-v1`) rather than letting tokens inherit broad permissions from the parent user. Parent users should be treated as mostly inert containers for explicitly scoped tokens.
+
+PVE API token creation is part of ordinary Configure, not a refusal-style ceremony like Bootstrap. If `pve_api_tokens.tofu` is absent, Configure creates `tofu-v1` in PVE and writes the secret to the Host Sibling SOPS File. If it is already present, Configure keeps the PVE user, role bindings, ACLs, and token ID converged without minting a replacement secret. If SOPS and PVE disagree about token existence, Configure fails clearly and points the operator at the PVE token rotation workflow.
+
+SOPS mutation for PVE tokens is owned by the local Host Configure wrapper, not by Ansible running on the Host. Ansible owns PVE-side mutation; the wrapper owns decrypting, merging, and atomically re-encrypting the Host Sibling SOPS File. If PVE token creation succeeds but the SOPS write fails, the wrapper must delete the just-created token and fail so no unrecoverable token secret is left behind.
+
+Configure owns only fortress-managed PVE identities. It may create, update, and remove declared fortress-owned users, tokens, roles, and ACL bindings, including deleting superseded tokens during rotation. It must not prune unrelated PVE users, tokens, roles, or ACLs that may exist for operator break-glass access or local manual use. Fortress-managed identities must follow a recognizable naming convention, such as `tofu@pve` with versioned `tofu-vN` tokens.
+
+Host-declared storage is documentation and validation input, not Configure input. `proxmox.storage[*].id` records storage IDs the operator has manually created and registered on that Host. Cross-file validation rejects any VM whose `hardware.disks[*].storage` is not declared by its `placement.host`.
+
+Host-declared network bridges are topology documentation and VM validation input; only bridges with `managed: true` are Configure input. The install-default management bridge, usually `vmbr0`, should be declared with `managed: false` unless the operator deliberately opts into automation. Cross-file validation rejects any VM whose `network.interfaces[*].bridge` is not declared by its `placement.host`, regardless of whether that bridge is managed or manual.
+
+```yaml
+network:
+  bridges:
+    - name: vmbr0
+      managed: false
+      vlan: 10
+      cidr: 10.10.0.11/24
+      gateway: 10.10.0.1
+
+    - name: vmbr1
+      managed: true
+      vlan_aware: true
+      mtu: 1500
+```
+
+Roles that require a reboot append reasons to a shared play-level reboot report instead of rebooting or printing isolated warnings. The playbook emits one final operator-facing summary, for example `Host wintermute requires an operator-controlled reboot: gpu_passthrough: kernel cmdline changed`. The summary must always state that no reboot was performed.
+
+System hygiene does not perform hypervisor package upgrades. It may update apt metadata, configure repositories, install declared baseline packages, and manage hostname/time settings. `apt upgrade`, `apt dist-upgrade`, and Proxmox upgrade choreography are operator-visible maintenance events and belong in a separate upgrade workflow/runbook.
+
+Datacenter configuration is out of scope for the initial Host Configure workflow. The fleet is a set of standalone Hosts, not a Proxmox cluster, so Configure should avoid a `proxmox_datacenter` role until there is a concrete standalone setting worth owning.
+
+`just host-configure` requires explicit tags. Calling it without `tags=` fails fast and prints the full command using every valid tag so the operator can re-run deliberately. Valid tags for the initial workflow are `proxmox_repos`, `system_hygiene`, `proxmox_network`, `proxmox_users`, and `gpu_passthrough`; unknown or out-of-scope tags such as `proxmox_storage` and `proxmox_datacenter` fail before Ansible starts.
+
+**Out of scope (deferred)**: PVE/host firewall, monitoring agents, datacenter configuration, ZFS pool creation, and storage registration. Backup config (vzdump schedules) is in scope as part of PBS integration (§12).
 
 ### 7.4. Rotation (`host-rotate-ssh-key.yml`, `host-rotate-pve-token.yml`)
 
@@ -506,6 +578,10 @@ hardware:
 Templates can carry GPU-aware *userland* (drivers, vainfo, intel-media-va-driver). Instances carry the actual PCI assignment. Templates remain reusable across hosts that may not all have iGPUs.
 
 **Reboot policy**: never auto-reboot. Ansible makes IOMMU/vfio changes, reports "reboot required", operator coordinates downtime.
+
+Major hardware configuration changes may require a reboot; that is acceptable and expected. Configure must make the requirement visible to the operator by setting/reporting `reboot_required`, but must never carry out the reboot automatically.
+
+GPU passthrough is Configure-managed when `gpu_passthrough.enabled: true` and a concrete mode is declared. Validation rejects contradictory declarations: disabled passthrough must omit mode-specific settings or use `none`; `mode: sriov` requires `sriov_vfs > 0` and keeps the host driver available; `mode: full` requires `blacklist_host_driver: true`; `vendor` and `iommu` must agree.
 
 **Consumer chipset caveat**: full-passthrough hosts may need `pcie_acs_override=downstream,multifunction` on the kernel cmdline for IOMMU group splitting. Ansible sets this conditionally for `mode: full` hosts. Not guaranteed to work on all consumer boards — fallback is "GPU passthrough not viable on this host."
 

@@ -46,7 +46,7 @@ The deliverable of this PRD is the set of building blocks needed to make all of 
 
 5. As the operator, I want the bootstrap command to refuse re-runs if the host is already bootstrapped, so that I cannot accidentally clobber a working credential.
 
-6. As the operator, I want one command to apply the full host configuration (repos, hygiene, network bridges, storage registration, datacenter config, PVE users with multiple roles, GPU passthrough setup), so that bringing a host to a usable state is one operation rather than many.
+6. As the operator, I want one command to apply the full host configuration (repos, hygiene, explicitly managed network bridges, PVE users with multiple roles, GPU passthrough setup), so that bringing a host to a usable state is one operation rather than many.
 
 7. As the operator, I want host configuration to be idempotent and re-runnable, so that I can converge the host to the declared state at any time without worrying about side effects.
 
@@ -176,7 +176,7 @@ The deliverable of this PRD is the set of building blocks needed to make all of 
 
 61. As the operator, I want JSON Schema validation per inventory file, so that shape errors are caught at edit time.
 
-62. As the operator, I want cross-file validation (referenced VM exists, no port collisions, no duplicate hostnames, NFS export references resolve), so that errors that span files are caught before deploy.
+62. As the operator, I want cross-file validation (referenced VM exists, no port collisions, no duplicate hostnames, NFS export references resolve, VM disk storage exists on the placed host, VM bridge exists on the placed host), so that errors that span files are caught before deploy.
 
 63. As the operator, I want a decryption health check that verifies every encrypted file in the repo can be decrypted with the current age recipients, so that a misconfigured `.sops.yaml` rule cannot silently produce undecryptable files.
 
@@ -226,7 +226,7 @@ Five **workflow modules** that compose roles into operator-facing playbooks; int
 
 7. **Host bootstrap** workflow. Generates per-host SSH key, pushes public, verifies, removes shared, writes encrypted private. Idempotency-refuses if encrypted file already exists.
 
-8. **Host configurator** workflow. Composes roles for proxmox repos, system hygiene, proxmox network, proxmox storage registration, proxmox users with multi-role tokens, and GPU passthrough. Composable via ansible tags so individual scopes can be applied independently.
+8. **Host configurator** workflow. Composes roles for proxmox repos, system hygiene, explicitly managed proxmox network bridges, proxmox users with multi-role tokens, and GPU passthrough. Storage remains documented/validated but operator-controlled; datacenter configuration is deferred while Hosts remain standalone. The workflow requires explicit ansible tags so individual scopes are applied deliberately.
 
 9. **VM template builder** workflow. Per host, downloads listed cloud images (with checksum cache), runs virt-customize against a working copy, creates the proxmox VM at the declared template VMID, imports the disk, sets hardware and cloud-init drive, marks as template. Skips if already a template at that VMID.
 
@@ -274,7 +274,7 @@ One **orchestration module** (declarative + bash):
 
 ### Schema additions captured
 
-The host yaml schema includes connection metadata, network bridges, storage pool registration (operator-created pools, ansible registers), datacenter/storage config, PVE users with multi-role token declarations, GPU passthrough mode (sriov/full/none with vendor and IOMMU type), and an explicit list of templates the host should hold.
+The host yaml schema includes connection metadata, network bridges with explicit `managed` ownership, documented storage IDs used for VM validation, PVE users with multi-role token declarations, GPU passthrough mode (sriov/full/none with vendor and IOMMU type), and an explicit list of templates the host should hold. Storage registration and datacenter configuration are not Host Configure automation contracts in this slice.
 
 The VM yaml schema includes vmid, placement (target host), source template, hardware overrides, network interfaces (static IP), cloud-init essentials (hostname), optional GPU PCI device assignment, optional NFS mounts referencing global exports, optional backup schedule with retention, and a populated-by-prepare plaintext public-key field.
 
@@ -322,7 +322,7 @@ None. Greenfield project; no existing test patterns to mirror. Test scaffolding 
 - **Workload assignment.** Which Plex VM lives where, which database hosts what — these are post-v1 decisions enabled by v1's building blocks.
 - **HA / multi-host service redundancy.** No active-active or hot-standby; loss of a host means downtime for VMs on that host until manual intervention.
 - **Proxmox host installation, BMC/IPMI configuration, boot disk partitioning.** These are runbook steps, not automation targets.
-- **Storage pool creation.** Ansible registers operator-created pools but does not create them. Pool creation is destructive and stays operator-controlled.
+- **Storage pool creation and registration.** Storage stays operator-controlled. Host yaml documents storage IDs for VM validation, but Ansible does not create pools or register `storage.cfg` entries in this slice.
 - **TrueNAS-side configuration.** TrueNAS is an external dependency; dataset creation, NFS export config, and allowed-host ACL updates are manual TrueNAS-side steps, documented but not automated.
 
 ## Further Notes

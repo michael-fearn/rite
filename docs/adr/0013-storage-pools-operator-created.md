@@ -1,3 +1,3 @@
-# Ansible registers storage pools but does not create them
+# Storage stays operator-controlled
 
-`host-configure.yml` registers existing storage pools in `storage.cfg` but never runs `zpool create`, `vgcreate`, or any other pool-creation command. Pool creation is destructive — a wrong device path is total data loss — and the cost of typing one command at the Proxmox console by hand is negligible against that risk. Configure fails clearly if a declared pool is missing on the Host, instead of creating it. Pool creation lives in `runbooks/new-host.md`, deliberately operator-controlled.
+`host-configure.yml` does not create or register storage pools. Pool creation and `storage.cfg` registration are operator-controlled and documented in `runbooks/new-host.md`. Storage operations are destructive enough that an incorrect device path or storage ID can cause data loss, while the cost of performing the Proxmox-side storage ceremony by hand is acceptable at this scale. Host YAML may document intended storage topology, but Configure must not treat it as an automation contract until a future decision explicitly brings storage registration back into scope.

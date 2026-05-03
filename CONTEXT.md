@@ -57,7 +57,7 @@ The VM-side equivalent: generate the per-VM SSH keypair, write the private half 
 _Avoid_: setup.
 
 **Configure**:
-An idempotent Ansible run that converges a Host or VM to its declared state. Re-runnable.
+An idempotent operator workflow that converges a Host or VM to its declared state, usually by wrapping an Ansible run. Re-runnable.
 _Avoid_: provision (reserve for tofu).
 
 **Rotation**:

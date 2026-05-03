@@ -29,8 +29,9 @@ secrets:
 
 ```bash
 cat > /tmp/fortress-decrypt-test.sops.yaml <<'YAML'
-ssh_root_key:
-  private_key: test-private-key
+ssh_keys:
+  bootstrap:
+    private_key: test-private-key
 YAML
 sops --encrypt --in-place /tmp/fortress-decrypt-test.sops.yaml
 scripts/decrypt-keys /tmp/fortress-decrypt-test.sops.yaml -- test -f /dev/shm/fortress/fortress-decrypt-test.key

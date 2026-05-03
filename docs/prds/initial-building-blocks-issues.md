@@ -99,17 +99,17 @@ The transition from a freshly-installed Proxmox host carrying a shared bootstrap
 
 ### What to build
 
-Convergence of a bootstrapped host to its declared state: repos, system hygiene, network bridges, storage registration, datacenter config, PVE users with multi-role tokens (auto-created and stored encrypted), GPU passthrough setup. Idempotent, never auto-reboots, tagged so individual scopes can be applied independently.
+Convergence of a bootstrapped host to its declared state: repos, system hygiene, explicitly managed network bridges, PVE users with multi-role tokens (auto-created and stored encrypted), GPU passthrough setup. Storage remains operator-controlled and documented/validated only for now. Datacenter configuration is deferred while Hosts remain standalone. Idempotent, never auto-reboots, tagged so individual scopes can be applied independently.
 
 ### Acceptance criteria
 
-- [ ] Roles exist and are independently tagged: `proxmox_repos`, `system_hygiene`, `proxmox_network`, `proxmox_storage`, `proxmox_datacenter`, `proxmox_users`, `gpu_passthrough`
+- [ ] Roles exist and are independently tagged: `proxmox_repos`, `system_hygiene`, `proxmox_network`, `proxmox_users`, `gpu_passthrough`
 - [ ] PVE API token for tofu created during configurator run; written encrypted into the host's sops file
 - [ ] GPU passthrough role supports SR-IOV (wintermute) and full passthrough (neuromancer, straylight) per host yaml declaration
-- [ ] Storage role registers operator-created pools (does not create them)
+- [ ] Storage is documented in Host yaml/runbook and used by VM cross-file validation, but Host Configure does not create or register storage
 - [ ] No automatic reboots — role flags `reboot_required` for operator action only
 - [ ] All roles idempotent; second run is a no-op
-- [ ] `just host-configure host=<name> [tags=<list>]` exposes the workflow
+- [ ] `just host-configure host=<name> tags=<list>` exposes the workflow; omitting tags fails and prints the all-tags command
 - [ ] `runbooks/new-host.md` extended with configure step
 - [ ] Demo: wintermute fully converged from declared state
 
@@ -169,7 +169,7 @@ OpenTofu reads the same VM yaml files Ansible uses; provider aliases come from t
 - [ ] `just vm-up vm=<name>` runs prepare → tofu apply (with explicit plan approval) → configure
 - [ ] `just vm-destroy vm=<name>` runs `tofu destroy` and removes the encrypted secrets file
 - [ ] `vm-destroy` refuses if any service yaml references the VM
-- [ ] PVE token rotation uses versioned names so rotations are atomic on the PVE side
+- [ ] Tofu wrapper reads the current versioned PVE token produced by Host Configure; token rotation itself remains in the rotation workflow
 - [ ] `runbooks/new-vm.md` written
 - [ ] Demo: provision a test VM end-to-end on wintermute, destroy cleanly
 
