@@ -9,12 +9,14 @@
   "remoteUser": "vscode",
   "mounts": [
     "source=${localEnv:HOME}/.config/sops/age/keys.txt,target=/home/vscode/.config/sops/age/keys.txt,type=bind,readonly",
+    "source=${localEnv:HOME}/.ssh/fortress-bootstrap,target=/home/vscode/.ssh/fortress-bootstrap,type=bind,readonly",
     "source=fortress-codex,target=/home/vscode/.codex,type=volume",
     "source=fortress-vscode-server-extensions,target=/home/vscode/.vscode-server/extensions,type=volume",
     "source=fortress-vscode-server-extensions-cache,target=/home/vscode/.vscode-server/extensionsCache,type=volume"
   ],
   "containerEnv": {
     "SOPS_AGE_KEY_FILE": "/home/vscode/.config/sops/age/keys.txt",
+    "FORTRESS_BOOTSTRAP_SSH_KEY": "/home/vscode/.ssh/fortress_bootstrap/ed25519,",
     "SHELL": "/bin/bash"
   },
   "customizations": {
@@ -33,5 +35,5 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.codex /home/vscode/.vscode-server/extensions /home/vscode/.vscode-server/extensionsCache"
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.codex /home/vscode/.vscode-server/data /home/vscode/.vscode-server/extensions /home/vscode/.vscode-server/extensionsCache"
 }

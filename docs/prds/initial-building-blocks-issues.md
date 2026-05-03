@@ -82,7 +82,7 @@ The transition from a freshly-installed Proxmox host carrying a shared bootstrap
 - [ ] Removes shared key from host's `authorized_keys`
 - [ ] Writes encrypted private key into `inventory/hosts/<host>.sops.yaml` as a structured key entry (type, created, public_key, private_key)
 - [ ] Refuses to run if `<host>.sops.yaml` already contains a bootstrap key entry
-- [ ] `just host-bootstrap host=<name>` exposes the workflow
+- [ ] `just host-bootstrap <name>` exposes the workflow
 - [ ] `runbooks/new-host.md` documents the bootstrap step
 - [ ] Demo: fresh PVE install of wintermute transitioned end-to-end
 

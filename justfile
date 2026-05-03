@@ -4,7 +4,7 @@ default:
     @just --list
 
 host-bootstrap host:
-    @echo "TODO: bootstrap Host {{host}}"
+    @./scripts/host-bootstrap {{host}}
 
 host-configure host tags="":
     @echo "TODO: configure Host {{host}} tags={{tags}}"
