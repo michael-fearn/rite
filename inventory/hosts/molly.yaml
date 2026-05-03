@@ -1,0 +1,28 @@
+proxmox:
+  pve_node_name: molly
+  endpoint: http://10.10.0.14:8006
+  # endpoint: https://molly.fearn.cloud:8006
+  templates: []
+    # - debian-12-base
+hardware:
+  cpu: AMD A9-9400
+  cores: 2
+  memory_gb: 8
+  storage:
+    - name: local-lvm
+      kind: lvmthin
+    - name: local
+      kind: directory
+network:
+  management_address: 10.10.0.14
+  bridges:
+    - name: vmbr0
+      vlan: 10
+      cidr: 10.10.0.14/24
+      gateway: 10.10.0.1
+gpu_passthrough:
+  enabled: false
+  vendor: none
+  mode: none
+  iommu: none
+  blacklist_host_driver: false

@@ -1,0 +1,28 @@
+proxmox:
+  pve_node_name: straylight
+  endpoint: http://10.10.0.12:8006
+  # endpoint: https://straylight.fearn.cloud:8006
+  templates: []
+    # - debian-12-base
+hardware:
+  cpu: i5-6500T
+  cores: 4
+  memory_gb: 32
+  storage:
+    - name: local-lvm
+      kind: lvmthin
+    - name: local
+      kind: directory
+network:
+  management_address: 10.10.0.12
+  bridges:
+    - name: vmbr0
+      vlan: 10
+      cidr: 10.10.0.12/24
+      gateway: 10.10.0.1
+gpu_passthrough:
+  enabled: true
+  vendor: intel
+  mode: full
+  iommu: intel
+  blacklist_host_driver: true
