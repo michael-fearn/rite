@@ -1,0 +1,7 @@
+name: debian-12-base
+vmid: 9001
+source:
+  url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+hardware:
+  cores: 2
+  memory: 2048

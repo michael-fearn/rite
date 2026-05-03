@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["domain", "nas"],
+  "properties": {
+    "domain": { "type": "string", "minLength": 1 },
+    "timezone": { "type": "string" },
+    "ntp_servers": { "type": "array", "items": { "type": "string" } },
+    "dns_resolvers": { "type": "array", "items": { "type": "string" } },
+    "vm_admin_user": { "type": "string" },
+    "nas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "exports"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1 },
+        "default_options": { "type": "array", "items": { "type": "string" } },
+        "exports": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string", "pattern": "^/" }
+        },
+        "uid_gid_map": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["uid", "gid"],
+            "properties": {
+              "uid": { "type": "integer", "minimum": 0 },
+              "gid": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "apt_repos": { "type": "object" }
+  }
+}

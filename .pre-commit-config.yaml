@@ -3,6 +3,41 @@ repos:
     hooks:
       - id: fortress-foundation-tests
         name: fortress foundation tests
-        entry: python3 -m unittest tests.test_foundation
+        entry: python3 -m unittest discover -s tests
+        language: system
+        pass_filenames: false
+      - id: fortress-host-schema
+        name: fortress Host schemas
+        entry: check-jsonschema --schemafile inventory/hosts/_schema.json
+        language: system
+        files: ^inventory/hosts/(?!_).+\.yaml$
+      - id: fortress-vm-schema
+        name: fortress VM schemas
+        entry: check-jsonschema --schemafile inventory/vms/_schema.json
+        language: system
+        files: ^inventory/vms/(?!_).+\.yaml$
+      - id: fortress-service-schema
+        name: fortress Service schemas
+        entry: check-jsonschema --schemafile inventory/services/_schema.json
+        language: system
+        files: ^inventory/services/(?!_).+\.yaml$
+      - id: fortress-template-schema
+        name: fortress Template schemas
+        entry: check-jsonschema --schemafile inventory/templates/_schema.json
+        language: system
+        files: ^inventory/templates/(?!_).+\.yaml$
+      - id: fortress-global-vars-schema
+        name: fortress global vars schema
+        entry: check-jsonschema --schemafile inventory/group_vars/all.schema.json
+        language: system
+        files: ^inventory/group_vars/all\.yaml$
+      - id: fortress-inventory-cross-file
+        name: fortress Inventory cross-file validation
+        entry: python3 -m fortress_inventory.validate_inventory
+        language: system
+        pass_filenames: false
+      - id: fortress-sops-decryption-health
+        name: fortress SOPS decryption health
+        entry: python3 -m fortress_inventory.check_sops_decryptable
         language: system
         pass_filenames: false

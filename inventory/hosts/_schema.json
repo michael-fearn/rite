@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["proxmox"],
+  "properties": {
+    "proxmox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pve_node_name"],
+      "properties": {
+        "pve_node_name": { "type": "string", "minLength": 1 },
+        "endpoint": { "type": "string", "minLength": 1 },
+        "templates": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "hardware": { "type": "object" },
+    "network": { "type": "object" },
+    "gpu_passthrough": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "vendor": { "enum": ["intel", "amd", "none"] },
+        "mode": { "enum": ["sriov", "full", "none"] },
+        "iommu": { "enum": ["intel", "amd", "none"] },
+        "sriov_vfs": { "type": "integer", "minimum": 0 },
+        "blacklist_host_driver": { "type": "boolean" }
+      }
+    }
+  }
+}

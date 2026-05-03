@@ -1,0 +1,5 @@
+domain: fearn.cloud
+nas:
+  server: 10.0.20.10
+  exports:
+    media: /mnt/pool/media

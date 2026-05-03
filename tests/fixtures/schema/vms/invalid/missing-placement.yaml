@@ -1,0 +1,8 @@
+vmid: 101
+source:
+  template: debian-12-base
+hardware:
+  cores: 2
+  memory: 4096
+cloud_init:
+  hostname: web01

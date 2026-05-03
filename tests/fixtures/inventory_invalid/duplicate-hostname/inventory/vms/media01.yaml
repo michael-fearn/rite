@@ -1,0 +1,10 @@
+vmid: 101
+placement:
+  host: wintermute
+source:
+  template: debian-12-base
+hardware:
+  cores: 2
+  memory: 4096
+cloud_init:
+  hostname: media01

@@ -74,6 +74,12 @@ class FoundationTests(unittest.TestCase):
         config = pre_commit.read_text()
         self.assertIn("fortress-foundation-tests", config)
         self.assertIn("python3 -m unittest", config)
+        self.assertIn("fortress-host-schema", config)
+        self.assertIn("check-jsonschema --schemafile inventory/hosts/_schema.json", config)
+        self.assertIn("fortress-inventory-cross-file", config)
+        self.assertIn("python3 -m fortress_inventory.validate_inventory", config)
+        self.assertIn("fortress-sops-decryption-health", config)
+        self.assertIn("python3 -m fortress_inventory.check_sops_decryptable", config)
 
     def test_initial_setup_runbook_documents_rebuild_ceremony(self):
         runbook = REPO_ROOT / "runbooks" / "initial-setup.md"

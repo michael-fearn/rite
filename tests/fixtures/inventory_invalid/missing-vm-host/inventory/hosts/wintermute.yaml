@@ -1,0 +1,3 @@
+proxmox:
+  pve_node_name: wintermute
+  templates: [debian-12-base]

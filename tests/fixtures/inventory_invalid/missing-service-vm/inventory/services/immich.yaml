@@ -1,0 +1,10 @@
+name: immich
+hostname: photos.fearn.cloud
+backend:
+  vm: missing01
+  port: 2283
+deploy:
+  type: quadlet
+  containers:
+    - name: server
+      image: ghcr.io/immich-app/immich-server:v1.120.0

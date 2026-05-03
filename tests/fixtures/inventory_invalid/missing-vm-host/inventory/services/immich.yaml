@@ -1,0 +1,10 @@
+name: immich
+hostname: photos.fearn.cloud
+backend:
+  vm: media01
+  port: 2283
+deploy:
+  type: quadlet
+  containers:
+    - name: server
+      image: image

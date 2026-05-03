@@ -1,0 +1,19 @@
+import argparse
+import sys
+
+from .validate import validate_inventory_tree
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Validate fortress Inventory cross-file rules.")
+    parser.add_argument("root", nargs="?", default=".", help="repository or fixture root")
+    args = parser.parse_args(argv)
+
+    errors = validate_inventory_tree(args.root)
+    for error in errors:
+        print(f"{error.path}: {error.code}: {error.message}", file=sys.stderr)
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

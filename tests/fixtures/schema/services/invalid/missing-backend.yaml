@@ -1,0 +1,7 @@
+name: immich
+hostname: photos.fearn.cloud
+deploy:
+  type: quadlet
+  containers:
+    - name: server
+      image: ghcr.io/immich-app/immich-server:v1.120.0

@@ -1,0 +1,22 @@
+name: debian-12-base
+vmid: 9001
+source:
+  url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+  checksum:
+    algorithm: sha512
+    value: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+customize:
+  packages:
+    - qemu-guest-agent
+    - sudo
+  run_commands:
+    - systemctl enable qemu-guest-agent
+hardware:
+  cores: 2
+  memory: 2048
+  bios: ovmf
+  machine: q35
+  scsi_controller: virtio-scsi-pci
+  network_model: virtio
+  agent_enabled: true
+  serial_console: true

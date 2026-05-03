@@ -1,0 +1,10 @@
+name: photos
+hostname: photos.fearn.cloud
+backend:
+  vm: media01
+  port: 2284
+deploy:
+  type: quadlet
+  containers:
+    - name: server
+      image: image

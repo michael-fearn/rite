@@ -1,0 +1,29 @@
+domain: fearn.cloud
+timezone: UTC
+ntp_servers:
+  - time.cloudflare.com
+dns_resolvers:
+  - 1.1.1.1
+  - 1.0.0.1
+vm_admin_user: admin
+nas:
+  server: 10.0.20.10
+  default_options:
+    - nfsvers=4.2
+    - soft
+    - _netdev
+  exports:
+    media: /mnt/pool/media
+    documents: /mnt/pool/documents
+    pbs: /mnt/pool/pbs
+    backups: /mnt/pool/backups
+  uid_gid_map:
+    media:
+      uid: 1000
+      gid: 1000
+    documents:
+      uid: 1001
+      gid: 1001
+apt_repos:
+  caddy_official:
+    url: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
