@@ -16,7 +16,7 @@ vm-configure vm:
     @./scripts/vm-configure {{vm}}
 
 vm-destroy vm:
-    @echo "TODO: destroy VM {{vm}}"
+    @./scripts/vm-destroy {{vm}}
 
 service-deploy service:
     @echo "TODO: deploy Service {{service}}"

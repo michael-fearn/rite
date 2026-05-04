@@ -4,6 +4,8 @@ Fortress keeps one root OpenTofu module under `tofu/`. That root module is the f
 
 `just vm-up <vm>` is the operator surface for VM bring-up. It delegates to `scripts/vm-up <vm>`, which validates the VM, runs Prepare, shows a selected-VM plan through `scripts/tofu-wrap plan -var selected_vm=<vm>`, requires the operator to type `apply <vm>`, then runs `scripts/tofu-wrap apply -var selected_vm=<vm> -auto-approve` and Configure. The tofu wrapper remains available for direct debugging. It decrypts each Host's current `pve_tokens.tofu.value` from its Host Sibling SOPS File into an ephemeral `TF_VAR_pve_token_<host>` environment variable, regenerates the ignored HCL, and invokes `tofu` from the `tofu/` working directory. Direct `tofu` invocation is unsupported because Tofu must never read SOPS.
 
+`just vm-destroy <vm>` is the operator surface for VM lifecycle destroy. It delegates to `scripts/vm-destroy <vm>`, validates that the VM is declared, refuses while any Service has a singular `backend.vm` reference to that VM, then runs `scripts/tofu-wrap destroy -var selected_vm=<vm>` with a resource target for only that VM's Proxmox VM resource. Deleting VM YAML and VM Sibling SOPS Files is separate human cleanup; lifecycle destroy leaves those Inventory files in the repo.
+
 Run `scripts/tofu-generate` after changing Host inventory. The command writes ignored build output:
 
 - `tofu/generated-providers.tf` contains one literal `provider "proxmox"` alias per Host and one sensitive `pve_token_<host>` variable per Host.
