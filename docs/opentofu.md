@@ -2,7 +2,7 @@
 
 Fortress keeps one root OpenTofu module under `tofu/`. That root module is the future fleet state boundary for VM provisioning. Inventory YAML remains the source of truth: `tofu/main.tf` decodes `inventory/vms/*.yaml`, while `inventory/hosts/*.yaml` drives generated Host provider coverage.
 
-`just vm-up <vm>` is the operator surface for VM bring-up. During this early slice the recipe is still a placeholder, so the implementation entry point for direct debugging is `scripts/tofu-wrap <args...>`, for example `scripts/tofu-wrap plan -var selected_vm=media01`. The wrapper decrypts each Host's current `pve_tokens.tofu.value` from its Host Sibling SOPS File into an ephemeral `TF_VAR_pve_token_<host>` environment variable, regenerates the ignored HCL, and invokes `tofu` from the `tofu/` working directory. Direct `tofu` invocation is unsupported because Tofu must never read SOPS.
+`just vm-up <vm>` is the operator surface for VM bring-up. It delegates to `scripts/vm-up <vm>`, which validates the VM, runs Prepare, shows a selected-VM plan through `scripts/tofu-wrap plan -var selected_vm=<vm>`, requires the operator to type `apply <vm>`, then runs `scripts/tofu-wrap apply -var selected_vm=<vm> -auto-approve` and Configure. The tofu wrapper remains available for direct debugging. It decrypts each Host's current `pve_tokens.tofu.value` from its Host Sibling SOPS File into an ephemeral `TF_VAR_pve_token_<host>` environment variable, regenerates the ignored HCL, and invokes `tofu` from the `tofu/` working directory. Direct `tofu` invocation is unsupported because Tofu must never read SOPS.
 
 Run `scripts/tofu-generate` after changing Host inventory. The command writes ignored build output:
 

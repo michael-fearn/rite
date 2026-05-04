@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("usage: scripts/vm-up <vm>", file=sys.stderr)
+        return 2
+
+    vm = sys.argv[1].removeprefix("vm=")
+    repo_root = Path(os.environ.get("FORTRESS_ROOT", Path(__file__).resolve().parents[1]))
+    vm_yaml = repo_root / "inventory" / "vms" / f"{vm}.yaml"
+    if not vm_yaml.is_file():
+        print(f"VM {vm!r} is not declared at {vm_yaml}", file=sys.stderr)
+        return 1
+
+    phases = [
+        ("Prepare", [str(repo_root / "scripts" / "vm-prepare"), vm]),
+        ("tofu plan", [str(repo_root / "scripts" / "tofu-wrap"), "plan", "-var", f"selected_vm={vm}"]),
+    ]
+    for phase, command in phases:
+        returncode = run_phase(phase, command, vm)
+        if returncode != 0:
+            return returncode
+
+    approval = input(f"Type 'apply {vm}' to apply the selected-VM plan: ")
+    if approval != f"apply {vm}":
+        print(f"Apply denied for VM {vm}", file=sys.stderr)
+        return 1
+
+    phases = [
+        (
+            "tofu apply",
+            [str(repo_root / "scripts" / "tofu-wrap"), "apply", "-var", f"selected_vm={vm}", "-auto-approve"],
+        ),
+        ("Configure", [str(repo_root / "scripts" / "vm-configure"), vm]),
+    ]
+    for phase, command in phases:
+        returncode = run_phase(phase, command, vm)
+        if returncode != 0:
+            return returncode
+
+    return 0
+
+
+def run_phase(phase, command, vm):
+    try:
+        result = subprocess.run(command)
+    except OSError as error:
+        print(f"{phase} failed for VM {vm}: {error}", file=sys.stderr)
+        return 1
+    if result.returncode != 0:
+        print(f"{phase} failed for VM {vm}", file=sys.stderr)
+        return result.returncode or 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

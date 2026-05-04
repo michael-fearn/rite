@@ -10,7 +10,7 @@ host-configure host tags="":
     @./scripts/host-configure {{host}} "{{tags}}"
 
 vm-up vm:
-    @echo "TODO: prepare, apply, and configure VM {{vm}}"
+    @./scripts/vm-up {{vm}}
 
 vm-configure vm:
     @./scripts/vm-configure {{vm}}
