@@ -12,6 +12,9 @@ host-configure host tags="":
 vm-up vm:
     @echo "TODO: prepare, apply, and configure VM {{vm}}"
 
+vm-configure vm:
+    @./scripts/vm-configure {{vm}}
+
 vm-destroy vm:
     @echo "TODO: destroy VM {{vm}}"
 

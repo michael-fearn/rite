@@ -1,0 +1,17 @@
+- name: Configure VM after first boot
+  hosts: vms
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Wait for SSH readiness
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+
+    - name: Wait for cloud-init completion
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+
+    - name: Finalize VM admin user
+      ansible.builtin.include_role:
+        name: vm_admin_user
+      tags: [vm_admin_user]

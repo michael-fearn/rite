@@ -50,7 +50,7 @@ install -d -m 0700 "$tmpfs_dir"
 for sops_file in "${sops_files[@]}"; do
   entity="$(basename "$sops_file" .sops.yaml)"
   key_path="$tmpfs_dir/${entity}.key"
-  sops --decrypt --extract '["ssh_root_key"]["private_key"]' "$sops_file" > "$key_path"
+  sops --decrypt --extract '["ssh_keys"]["bootstrap"]["private_key"]' "$sops_file" > "$key_path"
   chmod 0600 "$key_path"
 done
 

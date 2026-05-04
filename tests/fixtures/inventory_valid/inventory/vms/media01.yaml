@@ -8,6 +8,10 @@ hardware:
   memory: 4096
 cloud_init:
   hostname: media01
+network:
+  interfaces:
+    - bridge: vmbr0
+      address: 10.0.10.101/24
 nfs_mounts:
   - export: media
     mount_point: /mnt/nas/media

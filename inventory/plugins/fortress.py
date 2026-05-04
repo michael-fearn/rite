@@ -74,6 +74,15 @@ class InventoryModule(BaseInventoryPlugin):
             self.inventory.add_host(vm_name, "vms")
             self.inventory.set_variable(vm_name, "fortress_entity_kind", "VM")
             self.inventory.set_variable(vm_name, "fortress_vm", vm)
+            management_address = _first_vm_address(vm)
+            if management_address:
+                self.inventory.set_variable(vm_name, "ansible_host", management_address)
+            self.inventory.set_variable(vm_name, "ansible_user", model.globals.get("vm_admin_user", "admin"))
+            self.inventory.set_variable(
+                vm_name,
+                "ansible_ssh_common_args",
+                "-o StrictHostKeyChecking=accept-new",
+            )
             self._set_sibling_ssh_key_var(vm_name, root / "inventory" / "vms" / f"{vm_name}.sops.yaml")
             placement_host = vm.get("placement", {}).get("host")
             if placement_host:
@@ -91,6 +100,9 @@ class InventoryModule(BaseInventoryPlugin):
         key_dir = Path(os.environ.get("FORTRESS_KEY_DIR", "/dev/shm/fortress"))
         key_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         key_path = key_dir / f"{entity_name}.key"
+        if key_path.is_file():
+            self.inventory.set_variable(entity_name, "ansible_ssh_private_key_file", str(key_path))
+            return
         result = subprocess.run(
             ["sops", "--decrypt", "--extract", '["ssh_keys"]["bootstrap"]["private_key"]', str(sops_path)],
             stdout=subprocess.PIPE,
@@ -102,3 +114,13 @@ class InventoryModule(BaseInventoryPlugin):
         key_path.write_text(result.stdout)
         key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         self.inventory.set_variable(entity_name, "ansible_ssh_private_key_file", str(key_path))
+
+
+def _first_vm_address(vm):
+    interfaces = vm.get("network", {}).get("interfaces", [])
+    if not interfaces:
+        return None
+    address = interfaces[0].get("address")
+    if not address:
+        return None
+    return address.split("/", 1)[0]

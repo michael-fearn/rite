@@ -3,3 +3,6 @@ proxmox:
   templates: [debian-12-base]
 network:
   management_address: 10.0.0.10
+  bridges:
+    - name: vmbr0
+      managed: false

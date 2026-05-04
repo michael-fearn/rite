@@ -1,0 +1,23 @@
+- name: Ensure VM admin user exists
+  ansible.builtin.user:
+    name: "{{ fortress_globals.vm_admin_user | default('admin') }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+
+- name: Ensure VM admin SSH key is authorized
+  ansible.posix.authorized_key:
+    user: "{{ fortress_globals.vm_admin_user | default('admin') }}"
+    key: "{{ fortress_vm.ssh_public_key }}"
+    state: present
+  when: fortress_vm.ssh_public_key is defined
+
+- name: Allow VM admin passwordless sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-fortress-{{ fortress_globals.vm_admin_user | default('admin') }}"
+    owner: root
+    group: root
+    mode: "0440"
+    content: "{{ fortress_globals.vm_admin_user | default('admin') }} ALL=(ALL) NOPASSWD:ALL\n"
+    validate: "visudo -cf %s"
