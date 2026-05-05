@@ -39,7 +39,15 @@ just vm-destroy vm=<name>
 
 Destroy validates that the VM is declared, then refuses while any Service Backend references the VM. Remove or move those Service Backend references in a separate reviewable change before destroying the VM.
 
-The destroy command targets only the VM resource selected by `selected_vm`. It removes only the provisioned Proxmox VM. It leaves inventory/vms/<vm>.yaml and inventory/vms/<vm>.sops.yaml in the repo, so the declared VM can be recreated or removed later as an explicit Inventory edit.
+The destroy command targets only the VM resource selected by `selected_vm`. It removes the provisioned Proxmox VM and, after a successful destroy, deletes inventory/vms/<vm>.sops.yaml so encrypted VM private key material does not linger for a VM that no longer exists. Missing VM Sibling SOPS Files are treated as already clean.
+
+To also delete the VM yaml after successful destroy, run:
+
+```sh
+just vm-destroy vm=<name> delete_vm_yaml=true
+```
+
+That opt-in removes only inventory/vms/<vm>.yaml after the VM Sibling SOPS File has been deleted. It does not remove Service yamls or parent directories.
 
 ## AFK Agent Stop Points
 
@@ -69,4 +77,4 @@ Destroy:
 just vm-destroy vm=<name>
 ```
 
-Record the destroy result and confirm the Proxmox VM is gone. The Inventory yaml and VM Sibling SOPS File should still be present until a separate cleanup edit removes them.
+Record the destroy result and confirm the Proxmox VM is gone. The VM Sibling SOPS File should be deleted by the destroy command. The Inventory yaml should remain unless the demo explicitly used `delete_vm_yaml=true`.

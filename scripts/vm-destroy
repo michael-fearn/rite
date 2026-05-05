@@ -11,11 +11,18 @@ from fortress_tofu.generate import hcl_identifier
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: scripts/vm-destroy <vm>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print("usage: scripts/vm-destroy <vm> [--delete-vm-yaml]", file=sys.stderr)
         return 2
 
     vm = sys.argv[1].removeprefix("vm=")
+    delete_vm_yaml = False
+    if len(sys.argv) == 3:
+        if sys.argv[2] != "--delete-vm-yaml":
+            print("usage: scripts/vm-destroy <vm> [--delete-vm-yaml]", file=sys.stderr)
+            return 2
+        delete_vm_yaml = True
+
     repo_root = Path(os.environ.get("FORTRESS_ROOT", Path(__file__).resolve().parents[1]))
     model = load_inventory_tree(repo_root)
     if vm not in model.vms:
@@ -32,7 +39,7 @@ def main():
 
     host = model.vms[vm].get("placement", {}).get("host")
     target = f'module.vms_{hcl_identifier(host)}.proxmox_virtual_environment_vm.vm["{vm}"]'
-    return run_phase(
+    destroy_result = run_phase(
         "tofu destroy",
         [
             str(repo_root / "scripts" / "tofu-wrap"),
@@ -45,6 +52,10 @@ def main():
         ],
         vm,
     )
+    if destroy_result != 0:
+        return destroy_result
+
+    return delete_inventory_files(repo_root, vm, delete_vm_yaml)
 
 
 def service_backend_references(services, vm):
@@ -66,6 +77,33 @@ def run_phase(phase, command, vm):
         print(f"{phase} failed for VM {vm}", file=sys.stderr)
         return result.returncode or 1
     return 0
+
+
+def delete_inventory_files(repo_root, vm, delete_vm_yaml):
+    vm_yaml = repo_root / "inventory" / "vms" / f"{vm}.yaml"
+    vm_sops = repo_root / "inventory" / "vms" / f"{vm}.sops.yaml"
+
+    if not delete_file(vm_sops, "VM Sibling SOPS File", missing_ok=True):
+        return 1
+    if delete_vm_yaml and not delete_file(vm_yaml, "VM yaml", missing_ok=False):
+        return 1
+    return 0
+
+
+def delete_file(path, label, missing_ok):
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        if missing_ok:
+            print(f"{label} already absent: {path}")
+            return True
+        print(f"{label} is missing: {path}", file=sys.stderr)
+        return False
+    except OSError as error:
+        print(f"failed to delete {label} at {path}: {error}", file=sys.stderr)
+        return False
+    print(f"Deleted {label}: {path}")
+    return True
 
 
 if __name__ == "__main__":

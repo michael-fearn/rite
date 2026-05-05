@@ -84,7 +84,7 @@ The deliverable of this PRD is the set of building blocks needed to make all of 
 
 22. As the operator, I want tofu to always show a plan and require explicit approval, so that I never accidentally destroy a VM during a routine apply.
 
-23. As the operator, I want VM destruction to be a single command that runs `tofu destroy` and removes the VM's encrypted secrets file, so that the repository does not accumulate orphaned secret files.
+23. As the operator, I want VM destruction to be a single command that runs `tofu destroy`, removes the VM's Sibling SOPS File after successful destroy, and can optionally remove the VM yaml, so that the repository does not accumulate orphaned key material while VM declaration removal stays explicit.
 
 24. As the operator, I want VM destruction to refuse if any service still references the VM, so that I cannot destroy a VM that is still load-bearing for a deployed service.
 

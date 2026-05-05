@@ -13,8 +13,9 @@ class VMDestroyWorkflowTests(unittest.TestCase):
     def test_just_vm_destroy_calls_workflow_script(self):
         justfile = (REPO_ROOT / "justfile").read_text()
 
-        self.assertIn("vm-destroy vm:", justfile)
-        self.assertIn("./scripts/vm-destroy {{vm}}", justfile)
+        self.assertIn('vm-destroy vm delete_vm_yaml="false":', justfile)
+        self.assertIn('"{{delete_vm_yaml}}" = "delete_vm_yaml=true"', justfile)
+        self.assertIn("./scripts/vm-destroy {{vm}} --delete-vm-yaml", justfile)
 
     def test_vm_destroy_refuses_vm_referenced_by_service_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,14 +76,13 @@ class VMDestroyWorkflowTests(unittest.TestCase):
                 calls_log.read_text().splitlines(),
             )
 
-    def test_vm_destroy_preserves_vm_yaml_and_sibling_sops_file(self):
+    def test_vm_destroy_deletes_sibling_sops_file_and_preserves_vm_yaml_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, _calls_log = self._workflow_fixture(tmp)
             (root / "inventory" / "services" / "immich.yaml").unlink()
             vm_yaml = root / "inventory" / "vms" / "media01.yaml"
             vm_sops = root / "inventory" / "vms" / "media01.sops.yaml"
             original_yaml = vm_yaml.read_text()
-            original_sops = vm_sops.read_text()
             env = self._workflow_env(root, root / "calls.log")
 
             result = subprocess.run(
@@ -96,13 +96,85 @@ class VMDestroyWorkflowTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(original_yaml, vm_yaml.read_text())
+            self.assertFalse(vm_sops.exists())
+            self.assertIn("Deleted VM Sibling SOPS File:", result.stdout)
+
+    def test_vm_destroy_delete_vm_yaml_deletes_sibling_sops_file_then_vm_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            (root / "inventory" / "services" / "immich.yaml").unlink()
+            vm_yaml = root / "inventory" / "vms" / "media01.yaml"
+            vm_sops = root / "inventory" / "vms" / "media01.sops.yaml"
+            env = self._workflow_env(root, root / "calls.log")
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "vm-destroy"), "media01", "--delete-vm-yaml"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(vm_sops.exists())
+            self.assertFalse(vm_yaml.exists())
+            self.assertLess(
+                result.stdout.index("Deleted VM Sibling SOPS File:"),
+                result.stdout.index("Deleted VM yaml:"),
+            )
+
+    def test_vm_destroy_continues_when_sibling_sops_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            (root / "inventory" / "services" / "immich.yaml").unlink()
+            vm_sops = root / "inventory" / "vms" / "media01.sops.yaml"
+            vm_sops.unlink()
+            env = self._workflow_env(root, root / "calls.log")
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "vm-destroy"), "media01"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("VM Sibling SOPS File already absent:", result.stdout)
+
+    def test_vm_destroy_preserves_inventory_files_when_tofu_destroy_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            (root / "inventory" / "services" / "immich.yaml").unlink()
+            vm_yaml = root / "inventory" / "vms" / "media01.yaml"
+            vm_sops = root / "inventory" / "vms" / "media01.sops.yaml"
+            original_yaml = vm_yaml.read_text()
+            original_sops = vm_sops.read_text()
+            env = self._workflow_env(root, root / "calls.log")
+            env["FORTRESS_FAKE_TOFU_FAIL"] = "1"
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "vm-destroy"), "media01", "--delete-vm-yaml"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("tofu destroy failed for VM media01", result.stderr)
+            self.assertEqual(original_yaml, vm_yaml.read_text())
             self.assertEqual(original_sops, vm_sops.read_text())
 
     def test_docs_state_destroy_does_not_delete_inventory_files(self):
         docs = (REPO_ROOT / "docs" / "opentofu.md").read_text()
 
         self.assertIn("just vm-destroy", docs)
-        self.assertIn("Deleting VM YAML and VM Sibling SOPS Files is separate human cleanup", docs)
+        self.assertIn("deletes the VM Sibling SOPS File after a successful destroy", docs)
+        self.assertIn("delete_vm_yaml=true", docs)
 
     def _workflow_fixture(self, tmp):
         root = Path(tmp)
@@ -127,6 +199,7 @@ class VMDestroyWorkflowTests(unittest.TestCase):
         script = scripts_dir / "tofu-wrap"
         script.write_text(
             "#!/usr/bin/env bash\n"
+            "if [ -n \"$FORTRESS_FAKE_TOFU_FAIL\" ]; then exit 1; fi\n"
             "printf 'tofu-wrap %s\\n' \"$*\" >> \"$CALLS_LOG\"\n"
         )
         script.chmod(script.stat().st_mode | stat.S_IXUSR)

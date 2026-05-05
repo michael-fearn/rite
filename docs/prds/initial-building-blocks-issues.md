@@ -167,7 +167,8 @@ OpenTofu reads the same VM yaml files Ansible uses; provider aliases come from t
 - [ ] `prepare` refuses if VM's encrypted file already exists
 - [ ] `configure` playbook: waits for cloud-init completion, finalizes admin user
 - [ ] `just vm-up vm=<name>` runs prepare → tofu apply (with explicit plan approval) → configure
-- [ ] `just vm-destroy vm=<name>` runs `tofu destroy` and removes the encrypted secrets file
+- [ ] `just vm-destroy vm=<name>` runs `tofu destroy` and removes the VM Sibling SOPS File after successful destroy
+- [ ] `just vm-destroy vm=<name> delete_vm_yaml=true` removes the VM yaml after the VM Sibling SOPS File has been deleted
 - [ ] `vm-destroy` refuses if any service yaml references the VM
 - [ ] Tofu wrapper reads the current versioned PVE token produced by Host Configure; token rotation itself remains in the rotation workflow
 - [ ] `runbooks/new-vm.md` written
