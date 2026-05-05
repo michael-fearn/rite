@@ -12,6 +12,11 @@ SCHEMA_CASES = [
     ("VM", "inventory/vms/_schema.json", "tests/fixtures/schema/vms"),
     ("Service", "inventory/services/_schema.json", "tests/fixtures/schema/services"),
     ("Template", "inventory/templates/_schema.json", "tests/fixtures/schema/templates"),
+    (
+        "Template Verification Policy",
+        "inventory/template-verification-policy.schema.json",
+        "tests/fixtures/schema/template_verification_policy",
+    ),
     ("global vars", "inventory/group_vars/all.schema.json", "tests/fixtures/schema/group_vars"),
 ]
 
@@ -39,6 +44,7 @@ class InventorySchemaTests(unittest.TestCase):
             "vms": "placement",
             "services": "backend",
             "templates": "source",
+            "template_verification_policy": "storage_by_host",
             "group_vars": "nas",
         }
 
@@ -158,3 +164,27 @@ class InventorySchemaTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("customize", result.stdout + result.stderr)
+
+    def test_vm_schema_accepts_operational_lifecycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vm_yaml = Path(tmp) / "template-verify.yaml"
+            vm_yaml.write_text(
+                "vmid: 8901\n"
+                "lifecycle:\n"
+                "  kind: operational\n"
+                "  purpose: template-verification\n"
+                "  generated: true\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-12-base\n"
+                "hardware:\n"
+                "  cores: 1\n"
+                "  memory: 1024\n"
+                "cloud_init:\n"
+                "  hostname: template-verify\n"
+            )
+
+            result = self.run_schema("inventory/vms/_schema.json", str(vm_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

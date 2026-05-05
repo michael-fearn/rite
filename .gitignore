@@ -1,6 +1,8 @@
 .agents/
 .claude/
 *__pycache__/
+inventory/vms/tmp-template-verify*.yaml
+inventory/vms/tmp-template-verify*.sops.yaml
 tofu/generated-providers.tf
 tofu/generated-vm-partitions.tf
 tofu/.terraform/

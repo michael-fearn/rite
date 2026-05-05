@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from fortress_inventory.model import load_inventory_tree
 from fortress_inventory.validate import validate_inventory_tree
 
 
@@ -17,6 +18,11 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
     def test_valid_inventory_tree_has_no_cross_file_errors(self):
         self.assertEqual(validate_inventory_tree(FIXTURES / "inventory_valid"), [])
+
+    def test_inventory_model_loads_template_verification_policy(self):
+        model = load_inventory_tree(REPO_ROOT)
+
+        self.assertEqual(model.template_verification_policy["vmid"], 8901)
 
     def test_service_backend_vm_must_exist(self):
         self.assertIn("missing_service_backend_vm", self.codes_for("inventory_invalid/missing-service-vm"))
@@ -79,3 +85,74 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             )
 
             self.assertIn("missing_host_bridge", {error.code for error in validate_inventory_tree(root)})
+
+    def test_ordinary_vms_must_not_use_operational_vmids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_vm(root, "media01", 8901)
+
+            self.assertIn("ordinary_vm_operational_vmid", {error.code for error in validate_inventory_tree(root)})
+
+    def test_operational_vms_must_use_operational_vmids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_vm(
+                root,
+                "template-verify",
+                8801,
+                "lifecycle:\n"
+                "  kind: operational\n"
+                "  purpose: template-verification\n"
+                "  generated: true\n",
+            )
+
+            self.assertIn("operational_vm_vmid_out_of_range", {error.code for error in validate_inventory_tree(root)})
+
+    def test_template_vmids_are_reserved_for_templates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_vm(root, "media01", 9001)
+
+            self.assertIn("vm_uses_template_vmid", {error.code for error in validate_inventory_tree(root)})
+
+    def test_checked_in_tmp_vm_names_are_reserved_for_generated_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_vm(root, "tmp-template-verify", 101)
+
+            self.assertIn("reserved_tmp_vm_name", {error.code for error in validate_inventory_tree(root)})
+
+    def test_generated_tmp_operational_vm_names_are_allowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_vm(
+                root,
+                "tmp-template-verify",
+                8901,
+                "lifecycle:\n"
+                "  kind: operational\n"
+                "  purpose: template-verification\n"
+                "  generated: true\n",
+            )
+
+            self.assertNotIn("reserved_tmp_vm_name", {error.code for error in validate_inventory_tree(root)})
+
+    def write_fixture_vm(self, root, name, vmid, lifecycle=""):
+        (root / "inventory" / "vms" / f"{name}.yaml").write_text(
+            f"vmid: {vmid}\n"
+            f"{lifecycle}"
+            "placement:\n"
+            "  host: wintermute\n"
+            "source:\n"
+            "  template: debian-12-base\n"
+            "hardware:\n"
+            "  cores: 2\n"
+            "  memory: 4096\n"
+            "cloud_init:\n"
+            f"  hostname: {name}\n"
+        )

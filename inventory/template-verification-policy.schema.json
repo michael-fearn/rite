@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["vmid", "hardware", "storage_by_host", "address_by_host"],
+  "properties": {
+    "vmid": { "type": "integer", "minimum": 8900, "maximum": 8999 },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cores", "memory", "disk_size"],
+      "properties": {
+        "cores": { "type": "integer", "minimum": 1 },
+        "memory": { "type": "integer", "minimum": 256 },
+        "disk_size": { "type": "string", "minLength": 1 }
+      }
+    },
+    "storage_by_host": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "address_by_host": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    }
+  }
+}

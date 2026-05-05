@@ -1,0 +1,9 @@
+vmid: 8901
+hardware:
+  cores: 1
+  memory: 1024
+  disk_size: 8G
+storage_by_host:
+  wintermute: fast
+address_by_host:
+  wintermute: 10.10.0.221/24

@@ -79,8 +79,20 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("check-jsonschema --schemafile inventory/hosts/_schema.json", config)
         self.assertIn("fortress-inventory-cross-file", config)
         self.assertIn("python3 -m fortress_inventory.validate_inventory", config)
+        self.assertIn("fortress-template-verification-policy-schema", config)
+        self.assertIn("check-jsonschema --schemafile inventory/template-verification-policy.schema.json", config)
         self.assertIn("fortress-sops-decryption-health", config)
         self.assertIn("python3 -m fortress_inventory.check_sops_decryptable", config)
+
+    def test_generated_template_verification_vm_artifacts_are_ignored(self):
+        gitignore = (REPO_ROOT / ".gitignore").read_text()
+
+        for pattern in [
+            "inventory/vms/tmp-template-verify*.yaml",
+            "inventory/vms/tmp-template-verify*.sops.yaml",
+        ]:
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, gitignore)
 
     def test_initial_setup_runbook_documents_rebuild_ceremony(self):
         runbook = REPO_ROOT / "runbooks" / "initial-setup.md"

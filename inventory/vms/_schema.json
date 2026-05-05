@@ -6,6 +6,16 @@
   "properties": {
     "vmid": { "type": "integer", "minimum": 100, "maximum": 8999 },
     "description": { "type": "string" },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["ordinary", "operational"] },
+        "purpose": { "type": "string", "minLength": 1 },
+        "generated": { "type": "boolean" }
+      }
+    },
     "placement": {
       "type": "object",
       "additionalProperties": false,
