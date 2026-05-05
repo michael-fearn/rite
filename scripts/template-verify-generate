@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+import datetime
+import ipaddress
+import os
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from fortress_inventory.model import load_inventory_tree  # noqa: E402
+
+
+VM_NAME = "tmp-template-verify"
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("usage: scripts/template-verify-generate <host> <template>", file=sys.stderr)
+        return 2
+
+    host_name = sys.argv[1].removeprefix("host=")
+    template_name = sys.argv[2].removeprefix("template=")
+    repo_root = Path(os.environ.get("FORTRESS_ROOT", REPO_ROOT))
+    vm_yaml = repo_root / "inventory" / "vms" / f"{VM_NAME}.yaml"
+    vm_sops = repo_root / "inventory" / "vms" / f"{VM_NAME}.sops.yaml"
+
+    if vm_yaml.exists():
+        print(f"{vm_yaml} already exists; refusing to overwrite generated Template Verification VM inventory", file=sys.stderr)
+        return 1
+    if vm_sops.exists():
+        print(f"{vm_sops} already exists; refusing to overwrite generated Template Verification VM Sibling SOPS File", file=sys.stderr)
+        return 1
+
+    inventory = load_inventory_tree(repo_root)
+    resolved = resolve_declaration(repo_root, inventory, host_name, template_name)
+    if isinstance(resolved, int):
+        return resolved
+
+    host, template, policy, bridge = resolved
+    preflight = verify_real_template(repo_root, host_name, host, template)
+    if preflight != 0:
+        return preflight
+
+    return write_generated_inventory(repo_root, vm_yaml, vm_sops, host_name, template_name, policy, bridge)
+
+
+def resolve_declaration(repo_root, inventory, host_name, template_name):
+    host = inventory.hosts.get(host_name)
+    if not host:
+        print(f"Host {host_name!r} is not declared at {repo_root / 'inventory' / 'hosts' / f'{host_name}.yaml'}", file=sys.stderr)
+        return 1
+
+    template = inventory.templates.get(template_name)
+    if not template:
+        print(
+            f"Template {template_name!r} is not declared at {repo_root / 'inventory' / 'templates' / f'{template_name}.yaml'}",
+            file=sys.stderr,
+        )
+        return 1
+
+    declared_templates = host.get("proxmox", {}).get("templates", []) or []
+    if template_name not in declared_templates:
+        print(f"Host {host_name} does not declare Template {template_name} under proxmox.templates", file=sys.stderr)
+        return 1
+
+    policy = inventory.template_verification_policy
+    if host_name not in (policy.get("storage_by_host", {}) or {}):
+        print(f"Template Verification Policy has no storage_by_host entry for Host {host_name}", file=sys.stderr)
+        return 1
+    if host_name not in (policy.get("address_by_host", {}) or {}):
+        print(f"Template Verification Policy has no address_by_host entry for Host {host_name}", file=sys.stderr)
+        return 1
+
+    bridge = derive_bridge(host_name, host)
+    if isinstance(bridge, int):
+        return bridge
+    return host, template, policy, bridge
+
+
+def derive_bridge(host_name, host):
+    management_address = host.get("network", {}).get("management_address")
+    if not management_address:
+        print(f"Host {host_name} has no network.management_address for Template Verification VM bridge derivation", file=sys.stderr)
+        return 1
+    address = ipaddress.ip_address(management_address)
+    matches = []
+    for bridge in host.get("network", {}).get("bridges", []) or []:
+        cidr = bridge.get("cidr")
+        if not cidr:
+            continue
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            continue
+        if address in network:
+            matches.append(bridge)
+    if len(matches) != 1:
+        print(
+            f"Host {host_name} management address {management_address} must match exactly one Host bridge CIDR; found {len(matches)}",
+            file=sys.stderr,
+        )
+        return 1
+    if not matches[0].get("gateway"):
+        print(f"Host {host_name} bridge {matches[0].get('name')} has no gateway for Template Verification VM", file=sys.stderr)
+        return 1
+    return matches[0]
+
+
+def verify_real_template(repo_root, host_name, host, template):
+    management_address = host.get("network", {}).get("management_address")
+    if not management_address:
+        print(f"Host {host_name} has no network.management_address for real Template preflight", file=sys.stderr)
+        return 1
+    host_sops = repo_root / "inventory" / "hosts" / f"{host_name}.sops.yaml"
+    if not host_sops.is_file():
+        print(f"Host {host_name} has no sibling SOPS file at {host_sops}", file=sys.stderr)
+        return 1
+
+    with tempfile.TemporaryDirectory(
+        prefix="fortress-template-verify-host-ssh-",
+        dir="/dev/shm" if Path("/dev/shm").is_dir() else None,
+    ) as tmp:
+        key_path = Path(tmp) / f"{host_name}.key"
+        decrypted = subprocess.run(
+            ["sops", "--decrypt", "--extract", '["ssh_keys"]["bootstrap"]["private_key"]', str(host_sops)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if decrypted.returncode != 0:
+            print(f"failed to decrypt {host_sops}: {decrypted.stderr.strip()}", file=sys.stderr)
+            return 1
+        key_path.write_text(decrypted.stdout)
+        key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+        vmid = str(template["vmid"])
+        remote = subprocess.run(
+            [
+                "ssh",
+                "-i",
+                str(key_path),
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                f"root@{management_address}",
+                f"qm config {shlex.quote(vmid)}",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if remote.returncode != 0:
+            print(
+                f"Template {template['name']} VMID {vmid} is absent on Host {host_name}: {remote.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+        if not is_template_config(remote.stdout):
+            print(f"Template {template['name']} VMID {vmid} on Host {host_name} is not marked template: 1", file=sys.stderr)
+            return 1
+    return 0
+
+
+def write_generated_inventory(repo_root, vm_yaml, vm_sops, host_name, template_name, policy, bridge):
+    created = utc_timestamp()
+    with tempfile.TemporaryDirectory(prefix=f"{VM_NAME}-", dir=tmpfs_root()) as tmp:
+        tmpdir = Path(tmp)
+        key_path = tmpdir / VM_NAME
+        public_key_path = Path(f"{key_path}.pub")
+        plaintext_sops = tmpdir / f"{VM_NAME}.sops.yaml"
+        encrypted_sops = vm_sops.with_name(f".{VM_NAME}.sops.yaml.tmp")
+
+        subprocess.run(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                f"fortress-template-verify:{host_name}:{template_name}:{created}",
+                "-f",
+                str(key_path),
+            ],
+            check=True,
+        )
+        public_key = public_key_path.read_text().strip()
+        write_vm_yaml(vm_yaml, host_name, template_name, policy, bridge, public_key)
+        write_sops_plaintext(plaintext_sops, public_key, key_path, created)
+        subprocess.run(
+            [
+                "sops",
+                "--encrypt",
+                "--config",
+                str(repo_root / ".sops.yaml"),
+                "--filename-override",
+                str(vm_sops),
+                "--output",
+                str(encrypted_sops),
+                str(plaintext_sops),
+            ],
+            check=True,
+        )
+        shutil.move(str(encrypted_sops), vm_sops)
+
+    print(f"Generated Template Verification VM inventory at {vm_yaml} and {vm_sops}")
+    return 0
+
+
+def write_vm_yaml(path, host_name, template_name, policy, bridge, public_key):
+    hardware = policy["hardware"]
+    storage = policy["storage_by_host"][host_name]
+    address = policy["address_by_host"][host_name]
+    path.write_text(
+        f"vmid: {policy['vmid']}\n"
+        "description: Generated Template Verification VM. Do not edit by hand.\n"
+        "lifecycle:\n"
+        "  kind: operational\n"
+        "  purpose: template-verification\n"
+        "  generated: true\n"
+        "placement:\n"
+        f"  host: {host_name}\n"
+        "source:\n"
+        f"  template: {template_name}\n"
+        "hardware:\n"
+        f"  cores: {hardware['cores']}\n"
+        f"  memory: {hardware['memory']}\n"
+        "  disks:\n"
+        f"    - storage: {storage}\n"
+        f"      size: {hardware['disk_size']}\n"
+        "network:\n"
+        "  interfaces:\n"
+        f"    - bridge: {bridge['name']}\n"
+        f"      address: {address}\n"
+        f"      gateway: {bridge['gateway']}\n"
+        "cloud_init:\n"
+        f"  hostname: {VM_NAME}\n"
+        "backup:\n"
+        "  enabled: false\n"
+        f"ssh_public_key: {public_key}\n"
+    )
+
+
+def write_sops_plaintext(path, public_key, private_key_path, created):
+    private_key = indent_block(private_key_path.read_text().rstrip(), 6)
+    path.write_text(
+        "ssh_keys:\n"
+        "  bootstrap:\n"
+        "    type: vm_ssh\n"
+        f"    created: {created}\n"
+        f"    public_key: {public_key}\n"
+        "    private_key: |\n"
+        f"{private_key}\n"
+    )
+
+
+def is_template_config(output):
+    return any(line.strip() == "template: 1" for line in output.splitlines())
+
+
+def indent_block(value, spaces):
+    prefix = " " * spaces
+    return "\n".join(f"{prefix}{line}" for line in value.splitlines())
+
+
+def tmpfs_root():
+    root = Path("/dev/shm/fortress")
+    try:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return root
+    except OSError:
+        return None
+
+
+def utc_timestamp():
+    return datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
