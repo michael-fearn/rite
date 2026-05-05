@@ -25,6 +25,7 @@ class FoundationTests(unittest.TestCase):
 
     def test_just_lists_operator_command_stubs(self):
         expected_recipes = [
+            "test",
             "host-bootstrap",
             "host-configure",
             "vm-up",

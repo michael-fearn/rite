@@ -3,6 +3,10 @@ set positional-arguments
 default:
     @just --list
 
+test:
+    python3 -m unittest discover -s tests
+    pre-commit run --all-files
+
 host-bootstrap host:
     @./scripts/host-bootstrap {{host}}
 
