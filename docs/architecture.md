@@ -712,7 +712,7 @@ Local `tofu/terraform.tfstate`, gitignored. `just state-backup` copies to a docu
 
 ### 14.5. Approval
 
-Always show plan, require explicit confirmation. No auto-approve.
+Always show the selected-VM plan before apply. Interactive `vm-up` runs require explicit confirmation; `auto_confirm=true` skips only the prompt for an Operator-reviewed plan.
 
 ### 14.6. Auth flow
 

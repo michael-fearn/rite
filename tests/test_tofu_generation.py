@@ -148,6 +148,12 @@ class TofuGenerationTests(unittest.TestCase):
         self.assertIn("each.value.ssh_public_key", module)
         self.assertIn("run Prepare first", module)
 
+    def test_vm_partition_attaches_cloud_init_on_scsi_for_q35_ovmf_templates(self):
+        module = (REPO_ROOT / "tofu" / "modules" / "vm-partition" / "main.tf").read_text()
+
+        self.assertRegex(module, r"interface\s*=\s*local\.vm_cloud_init_interfaces\[each\.key\]")
+        self.assertIn('startswith(local.vm_cloud_init_interfaces[each.key], "scsi")', module)
+
     def test_generated_tofu_outputs_and_local_state_are_ignored(self):
         gitignore = (REPO_ROOT / ".gitignore").read_text()
 

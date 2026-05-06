@@ -13,11 +13,14 @@ host-bootstrap host:
 host-configure host tags="":
     @./scripts/host-configure {{host}} "{{tags}}"
 
-vm-up vm:
-    @./scripts/vm-up {{vm}}
+vm-up vm auto_confirm="false":
+    @if [ "{{auto_confirm}}" = "true" ] || [ "{{auto_confirm}}" = "auto_confirm=true" ]; then ./scripts/vm-up {{vm}} --auto-confirm; else ./scripts/vm-up {{vm}}; fi
 
 vm-configure vm:
     @./scripts/vm-configure {{vm}}
+
+vm-shell vm:
+    @./scripts/vm-shell {{vm}}
 
 vm-destroy vm delete_vm_yaml="false":
     @if [ "{{delete_vm_yaml}}" = "true" ] || [ "{{delete_vm_yaml}}" = "delete_vm_yaml=true" ]; then ./scripts/vm-destroy {{vm}} --delete-vm-yaml; else ./scripts/vm-destroy {{vm}}; fi

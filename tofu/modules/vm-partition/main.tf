@@ -49,6 +49,9 @@ locals {
       ]
     )
   }
+  vm_cloud_init_interfaces = {
+    for vm_name, vm in var.vms : vm_name => "scsi${max(1, length(try(vm.hardware.disks, [])))}"
+  }
 }
 
 resource "proxmox_virtual_environment_file" "cloud_init_user_data" {
@@ -107,6 +110,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   initialization {
+    interface         = local.vm_cloud_init_interfaces[each.key]
     user_data_file_id = proxmox_virtual_environment_file.cloud_init_user_data[each.key].id
 
     dynamic "ip_config" {
@@ -138,6 +142,13 @@ resource "proxmox_virtual_environment_vm" "vm" {
       bridge  = network_device.value.bridge
       model   = network_device.value.model
       vlan_id = network_device.value.vlan
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = startswith(local.vm_cloud_init_interfaces[each.key], "scsi")
+      error_message = "cloud-init must attach through SCSI so q35/OVMF Debian guests can see the first-boot datasource."
     }
   }
 }

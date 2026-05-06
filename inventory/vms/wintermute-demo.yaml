@@ -19,4 +19,4 @@ cloud_init:
   hostname: wintermute-demo
 backup:
   enabled: false
-ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDSr70TiQnKvV7h9TNnw6pHKXJs4XYXkwD8jvQzILuax fortress-vm-prepare:wintermute-demo:2026-05-06T02:20:40Z
+ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPfHm825oY94w1pOelAjntptVXeHuvpEqOjlxYfg3P1L fortress-vm-prepare:wintermute-demo:2026-05-06T04:25:15Z

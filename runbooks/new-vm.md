@@ -27,6 +27,25 @@ The command is the operator path for the full VM lifecycle bring-up:
 5. `scripts/tofu-wrap apply -var selected_vm=<name> -auto-approve` provisions the Proxmox VM.
 6. Configure runs after apply. Configure waits for cloud-init to complete before finalizing the VM with Ansible, so it does not race first boot.
 
+For a non-interactive run where the selected-VM plan has already been reviewed by the Operator, pass:
+
+```sh
+just vm-up vm=<name> auto_confirm=true
+```
+
+This still runs and displays the plan before apply; it skips only the `apply <name>` prompt.
+
+After a VM is prepared and reachable, open an interactive SSH session through
+the Ansible Inventory connection details:
+
+```sh
+just vm-shell <name>
+```
+
+The shell command requires the VM yaml and VM Sibling SOPS File, then uses the
+resolved `ansible_host`, `ansible_user`, `ansible_ssh_private_key_file`, and
+`ansible_ssh_common_args` values from Ansible Inventory.
+
 If the plan is surprising, deny the prompt and inspect Inventory before trying again.
 
 ## Destroy

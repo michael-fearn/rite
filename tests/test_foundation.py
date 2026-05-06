@@ -29,6 +29,7 @@ class FoundationTests(unittest.TestCase):
             "host-bootstrap",
             "host-configure",
             "vm-up",
+            "vm-shell",
             "vm-destroy",
             "service-deploy",
             "templates-build",

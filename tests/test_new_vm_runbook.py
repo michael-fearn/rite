@@ -18,6 +18,8 @@ class NewVMRunbookTests(unittest.TestCase):
             "private key is encrypted in inventory/vms/<vm>.sops.yaml",
             "just vm-up vm=<name>",
             "Type `apply <name>`",
+            "just vm-up vm=<name> auto_confirm=true",
+            "skips only the `apply <name>` prompt",
             "Configure waits for cloud-init to complete",
             "just vm-destroy vm=<name>",
             "refuses while any Service Backend references the VM",

@@ -105,7 +105,8 @@ class TemplateBuildWorkflowTests(unittest.TestCase):
             self.assertIn("qm create 9001 --name debian-12-base --memory 2048 --cores 2", calls)
             self.assertIn("qm importdisk 9001 ", calls)
             self.assertIn(" fast", calls)
-            self.assertIn("qm set 9001 --ide2 local-lvm:cloudinit", calls)
+            self.assertIn("qm set 9001 --scsi1 local-lvm:cloudinit", calls)
+            self.assertNotIn("--ide2 local-lvm:cloudinit", calls)
             self.assertIn("qm template 9001", calls)
 
     def test_cache_hit_verifies_cached_image_and_avoids_download(self):

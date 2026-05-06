@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("usage: scripts/vm-shell <vm>", file=sys.stderr)
+        return 2
+
+    vm = sys.argv[1].removeprefix("vm=")
+    repo_root = Path(os.environ.get("FORTRESS_ROOT", Path(__file__).resolve().parents[1]))
+    vm_yaml = repo_root / "inventory" / "vms" / f"{vm}.yaml"
+    vm_sops = repo_root / "inventory" / "vms" / f"{vm}.sops.yaml"
+    if not vm_yaml.is_file():
+        print(f"VM {vm!r} is not declared at {vm_yaml}", file=sys.stderr)
+        return 1
+    if not vm_sops.is_file():
+        print(f"VM Sibling SOPS File is required at {vm_sops}. Run VM Prepare first.", file=sys.stderr)
+        return 1
+
+    hostvars = _load_hostvars(repo_root)
+    vm_vars = _ansible_value(hostvars.get(vm, {}))
+
+    ansible_host = vm_vars.get("ansible_host")
+    if not ansible_host:
+        print(f"VM {vm!r} has no ansible_host in Ansible Inventory", file=sys.stderr)
+        return 1
+
+    ansible_user = vm_vars.get("ansible_user")
+    if not ansible_user:
+        print(f"VM {vm!r} has no ansible_user in Ansible Inventory", file=sys.stderr)
+        return 1
+
+    key_file = vm_vars.get("ansible_ssh_private_key_file")
+    if not key_file:
+        print(f"VM {vm!r} has no ansible_ssh_private_key_file in Ansible Inventory", file=sys.stderr)
+        return 1
+
+    ssh_args = ["ssh", "-t"]
+    common_args = vm_vars.get("ansible_ssh_common_args")
+    if common_args:
+        ssh_args.extend(shlex.split(common_args))
+    ssh_args.extend(["-i", key_file, f"{ansible_user}@{ansible_host}"])
+    return subprocess.run(
+        [
+            str(repo_root / "scripts" / "decrypt-keys"),
+            str(vm_sops),
+            "--",
+            *ssh_args,
+        ]
+    ).returncode
+
+
+def _load_hostvars(repo_root):
+    result = subprocess.run(
+        [
+            "ansible-inventory",
+            "-i",
+            str(repo_root / "inventory" / "fortress.yaml"),
+            "--list",
+        ],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    inventory = json.loads(result.stdout)
+    return inventory.get("_meta", {}).get("hostvars", {})
+
+
+def _ansible_value(value):
+    if isinstance(value, dict) and set(value) == {"__ansible_unsafe"}:
+        return value["__ansible_unsafe"]
+    if isinstance(value, dict):
+        return {key: _ansible_value(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_ansible_value(child) for child in value]
+    return value
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

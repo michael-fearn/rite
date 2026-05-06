@@ -212,7 +212,7 @@ def run_qm_create(template, working_copy):
         ["qm", "set", vmid, "--scsihw", scsi_controller, "--scsi0", f"{disk_storage}:vm-{vmid}-disk-0"],
         check=True,
     )
-    subprocess.run(["qm", "set", vmid, "--ide2", f"{cloud_init_storage}:cloudinit"], check=True)
+    subprocess.run(["qm", "set", vmid, "--scsi1", f"{cloud_init_storage}:cloudinit"], check=True)
     subprocess.run(["qm", "set", vmid, "--boot", "order=scsi0"], check=True)
 
     optional_sets = []
@@ -380,7 +380,7 @@ def run_qm_create(template, working_copy):
         ["qm", "set", vmid, "--scsihw", scsi_controller, "--scsi0", f"{disk_storage}:vm-{vmid}-disk-0"],
         check=True,
     )
-    subprocess.run(["qm", "set", vmid, "--ide2", f"{cloud_init_storage}:cloudinit"], check=True)
+    subprocess.run(["qm", "set", vmid, "--scsi1", f"{cloud_init_storage}:cloudinit"], check=True)
     subprocess.run(["qm", "set", vmid, "--boot", "order=scsi0"], check=True)
 
     optional_sets = []

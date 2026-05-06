@@ -6,11 +6,24 @@
     shell: /bin/bash
     create_home: true
 
+- name: Ensure VM admin SSH directory exists
+  ansible.builtin.file:
+    path: "/home/{{ fortress_globals.vm_admin_user | default('admin') }}/.ssh"
+    state: directory
+    owner: "{{ fortress_globals.vm_admin_user | default('admin') }}"
+    group: "{{ fortress_globals.vm_admin_user | default('admin') }}"
+    mode: "0700"
+  when: fortress_vm.ssh_public_key is defined
+
 - name: Ensure VM admin SSH key is authorized
-  ansible.posix.authorized_key:
-    user: "{{ fortress_globals.vm_admin_user | default('admin') }}"
-    key: "{{ fortress_vm.ssh_public_key }}"
+  ansible.builtin.lineinfile:
+    path: "/home/{{ fortress_globals.vm_admin_user | default('admin') }}/.ssh/authorized_keys"
+    line: "{{ fortress_vm.ssh_public_key }}"
     state: present
+    create: true
+    owner: "{{ fortress_globals.vm_admin_user | default('admin') }}"
+    group: "{{ fortress_globals.vm_admin_user | default('admin') }}"
+    mode: "0600"
   when: fortress_vm.ssh_public_key is defined
 
 - name: Allow VM admin passwordless sudo

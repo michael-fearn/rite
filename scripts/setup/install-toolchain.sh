@@ -66,11 +66,13 @@ install_apt_packages() {
     jq \
     less \
     locales \
+    nano \
     openssh-client \
     pipx \
     python3 \
     python3-pip \
     python3-venv \
+    direnv \
     sudo \
     tini \
     unzip

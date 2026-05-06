@@ -13,8 +13,10 @@ class VMUpWorkflowTests(unittest.TestCase):
     def test_just_vm_up_calls_workflow_script(self):
         justfile = (REPO_ROOT / "justfile").read_text()
 
-        self.assertIn("vm-up vm:", justfile)
+        self.assertIn('vm-up vm auto_confirm="false":', justfile)
         self.assertIn("./scripts/vm-up {{vm}}", justfile)
+        self.assertIn("--auto-confirm", justfile)
+        self.assertIn('"{{auto_confirm}}" = "auto_confirm=true"', justfile)
 
     def test_vm_up_rejects_undeclared_vms_before_any_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,6 +91,43 @@ class VMUpWorkflowTests(unittest.TestCase):
                 ],
                 calls_log.read_text().splitlines(),
             )
+
+    def test_vm_up_auto_confirm_skips_interactive_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._workflow_fixture(tmp)
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "vm-up"), "media01", "--auto-confirm"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [
+                    "vm-prepare media01",
+                    "tofu-wrap plan -var selected_vm=media01",
+                    "tofu-wrap apply -var selected_vm=media01 -auto-approve",
+                    "vm-configure media01",
+                ],
+                calls_log.read_text().splitlines(),
+            )
+
+    def test_vm_up_rejects_unknown_flags(self):
+        result = subprocess.run(
+            [str(REPO_ROOT / "scripts" / "vm-up"), "media01", "--yes"],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("usage: scripts/vm-up <vm> [--auto-confirm]", result.stderr)
 
     def test_vm_up_stops_and_reports_the_failed_phase(self):
         scenarios = {
