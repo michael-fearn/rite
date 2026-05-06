@@ -45,7 +45,49 @@ Run:
 just templates-build host=<name>
 ```
 
+Or, using the placeholder used by the workflow recipes:
+
+```sh
+just templates-build host=<host>
+```
+
 The command builds only the Templates listed on that Host. An undeclared Host name fails before any tool runs.
+
+Build is the Template creation workflow. It downloads and verifies the checksum-pinned Cloud Image, customizes a working copy, creates the Proxmox VM on the selected Host, attaches cloud-init, and marks the VM as a Template. It does not create a Template Verification VM.
+
+## Verify
+
+After building a Template, verify that it satisfies the VM Lifecycle Contract on the Host where ordinary VMs will clone from it.
+
+To verify one Host:
+
+```sh
+just template-verify host=<host> template=<template>
+```
+
+To verify every Host that declares the selected Template:
+
+```sh
+just template-verify host=all template=<template>
+```
+
+Verification is separate from build. The command first checks that the selected Proxmox Template exists on the Host and is marked `template: 1`, then generates `inventory/vms/tmp-template-verify.yaml` plus `inventory/vms/tmp-template-verify.sops.yaml`, provisions the Template Verification VM, runs the Template verification playbook against it, and destroys the Template Verification VM when the workflow finishes.
+
+For `host=all`, each Host is reported as `passed`, `failed`, or `skipped`. `skipped` means the Host does not declare the selected Template under `proxmox.templates`, so no verification VM is generated there.
+
+By default, a verification or provision failure still runs cleanup and destroys the Template Verification VM, including the generated VM yaml and Sibling SOPS File.
+
+For failure inspection, run:
+
+```sh
+just template-verify host=<host> template=<template> keep_on_fail=true
+```
+
+With `keep_on_fail=true`, fortress preserves the failed Template Verification VM and its generated artifacts for inspection: `inventory/vms/tmp-template-verify.yaml`, `inventory/vms/tmp-template-verify.sops.yaml`, and the Proxmox VM at the Template Verification Policy VMID. Destroy it when finished:
+
+```sh
+just vm-destroy tmp-template-verify delete_vm_yaml=true
+```
 
 ## Checksum and Cache Behavior
 

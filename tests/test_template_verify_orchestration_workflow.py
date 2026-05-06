@@ -51,6 +51,20 @@ class TemplateVerifyOrchestrationWorkflowTests(unittest.TestCase):
         self.assertIn("{{template}}", justfile)
         self.assertIn("{{keep_on_fail}}", justfile)
 
+    def test_new_template_runbook_documents_template_verification_operator_workflow(self):
+        content = (REPO_ROOT / "runbooks" / "new-template.md").read_text()
+
+        self.assertIn("just templates-build host=<host>", content)
+        self.assertIn("just template-verify host=<host> template=<template>", content)
+        self.assertIn("just template-verify host=all template=<template>", content)
+        self.assertIn("skipped", content)
+        self.assertIn("Host does not declare the selected Template", content)
+        self.assertIn("destroys the Template Verification VM", content)
+        self.assertIn("keep_on_fail=true", content)
+        self.assertIn("preserves the failed Template Verification VM", content)
+        self.assertIn("inventory/vms/tmp-template-verify.yaml", content)
+        self.assertIn("inventory/vms/tmp-template-verify.sops.yaml", content)
+
     def test_host_all_reports_passed_failed_and_skipped_hosts_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, calls_log = self._fixture(tmp)
