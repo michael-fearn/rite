@@ -29,8 +29,8 @@ class TemplateVerifyGenerationWorkflowTests(unittest.TestCase):
             self.assertIn("sops --decrypt --extract", calls)
             self.assertIn("ssh -i ", calls)
             self.assertIn("root@10.10.0.11 qm config 9001", calls)
-            self.assertIn("ssh-keygen -t ed25519", calls)
-            self.assertIn("sops --encrypt --config", calls)
+            self.assertNotIn("ssh-keygen -t ed25519", calls)
+            self.assertNotIn("sops --encrypt --config", calls)
 
             vm_yaml = (root / "inventory" / "vms" / "tmp-template-verify.yaml").read_text()
             self.assertIn("vmid: 8901", vm_yaml)
@@ -48,16 +48,10 @@ class TemplateVerifyGenerationWorkflowTests(unittest.TestCase):
             self.assertIn("gateway: 10.10.0.1", vm_yaml)
             self.assertIn("hostname: tmp-template-verify", vm_yaml)
             self.assertIn("enabled: false", vm_yaml)
-            self.assertIn("ssh_public_key: ssh-ed25519 verify-public tmp-template-verify", vm_yaml)
+            self.assertNotIn("ssh_public_key:", vm_yaml)
 
             vm_sops = root / "inventory" / "vms" / "tmp-template-verify.sops.yaml"
-            self.assertEqual("encrypted template verify sops\n", vm_sops.read_text())
-            plaintext_sops = (root / "template-verify-plaintext.sops.yaml").read_text()
-            self.assertIn("ssh_keys:\n", plaintext_sops)
-            self.assertIn("  bootstrap:\n", plaintext_sops)
-            self.assertIn("    type: vm_ssh\n", plaintext_sops)
-            self.assertIn("    public_key: ssh-ed25519 verify-public tmp-template-verify\n", plaintext_sops)
-            self.assertIn("    private_key: |\n", plaintext_sops)
+            self.assertFalse(vm_sops.exists())
 
     def test_refuses_when_generated_vm_inventory_already_exists_before_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:

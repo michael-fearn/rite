@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-import datetime
 import ipaddress
 import os
 import shlex
-import shutil
 import stat
 import subprocess
 import sys
@@ -48,7 +46,7 @@ def main():
     if preflight != 0:
         return preflight
 
-    return write_generated_inventory(repo_root, vm_yaml, vm_sops, host_name, template_name, policy, bridge)
+    return write_generated_inventory(vm_yaml, host_name, template_name, policy, bridge)
 
 
 def resolve_declaration(repo_root, inventory, host_name, template_name):
@@ -169,53 +167,13 @@ def verify_real_template(repo_root, host_name, host, template):
     return 0
 
 
-def write_generated_inventory(repo_root, vm_yaml, vm_sops, host_name, template_name, policy, bridge):
-    created = utc_timestamp()
-    with tempfile.TemporaryDirectory(prefix=f"{VM_NAME}-", dir=tmpfs_root()) as tmp:
-        tmpdir = Path(tmp)
-        key_path = tmpdir / VM_NAME
-        public_key_path = Path(f"{key_path}.pub")
-        plaintext_sops = tmpdir / f"{VM_NAME}.sops.yaml"
-        encrypted_sops = vm_sops.with_name(f".{VM_NAME}.sops.yaml.tmp")
-
-        subprocess.run(
-            [
-                "ssh-keygen",
-                "-t",
-                "ed25519",
-                "-N",
-                "",
-                "-C",
-                f"fortress-template-verify:{host_name}:{template_name}:{created}",
-                "-f",
-                str(key_path),
-            ],
-            check=True,
-        )
-        public_key = public_key_path.read_text().strip()
-        write_vm_yaml(vm_yaml, host_name, template_name, policy, bridge, public_key)
-        write_sops_plaintext(plaintext_sops, public_key, key_path, created)
-        subprocess.run(
-            [
-                "sops",
-                "--encrypt",
-                "--config",
-                str(repo_root / ".sops.yaml"),
-                "--filename-override",
-                str(vm_sops),
-                "--output",
-                str(encrypted_sops),
-                str(plaintext_sops),
-            ],
-            check=True,
-        )
-        shutil.move(str(encrypted_sops), vm_sops)
-
-    print(f"Generated Template Verification VM inventory at {vm_yaml} and {vm_sops}")
+def write_generated_inventory(vm_yaml, host_name, template_name, policy, bridge):
+    write_vm_yaml(vm_yaml, host_name, template_name, policy, bridge)
+    print(f"Generated Template Verification VM inventory at {vm_yaml}")
     return 0
 
 
-def write_vm_yaml(path, host_name, template_name, policy, bridge, public_key):
+def write_vm_yaml(path, host_name, template_name, policy, bridge):
     hardware = policy["hardware"]
     storage = policy["storage_by_host"][host_name]
     address = policy["address_by_host"][host_name]
@@ -245,43 +203,11 @@ def write_vm_yaml(path, host_name, template_name, policy, bridge, public_key):
         f"  hostname: {VM_NAME}\n"
         "backup:\n"
         "  enabled: false\n"
-        f"ssh_public_key: {public_key}\n"
-    )
-
-
-def write_sops_plaintext(path, public_key, private_key_path, created):
-    private_key = indent_block(private_key_path.read_text().rstrip(), 6)
-    path.write_text(
-        "ssh_keys:\n"
-        "  bootstrap:\n"
-        "    type: vm_ssh\n"
-        f"    created: {created}\n"
-        f"    public_key: {public_key}\n"
-        "    private_key: |\n"
-        f"{private_key}\n"
     )
 
 
 def is_template_config(output):
     return any(line.strip() == "template: 1" for line in output.splitlines())
-
-
-def indent_block(value, spaces):
-    prefix = " " * spaces
-    return "\n".join(f"{prefix}{line}" for line in value.splitlines())
-
-
-def tmpfs_root():
-    root = Path("/dev/shm/fortress")
-    try:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        return root
-    except OSError:
-        return None
-
-
-def utc_timestamp():
-    return datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":

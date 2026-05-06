@@ -23,7 +23,7 @@ variable "templates" {
 }
 
 variable "vms" {
-  type = map(any)
+  type = any
 }
 
 locals {

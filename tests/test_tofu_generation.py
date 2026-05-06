@@ -115,7 +115,8 @@ class TofuGenerationTests(unittest.TestCase):
 
         self.assertIn('fileset("../inventory/vms", "*.yaml")', root_module)
         self.assertIn("yamldecode(", root_module)
-        self.assertIn("vms = tomap({", root_module)
+        self.assertIn("vms = {", root_module)
+        self.assertNotIn("vms = tomap({", root_module)
 
     def test_root_tofu_module_filters_to_selected_vm_before_host_partitioning(self):
         root_module = (REPO_ROOT / "tofu" / "main.tf").read_text()
@@ -124,11 +125,12 @@ class TofuGenerationTests(unittest.TestCase):
         self.assertIn('variable "selected_vm"', root_module)
         self.assertIn("selected_vms", root_module)
         self.assertIn("globals = yamldecode", root_module)
-        self.assertIn("local.vms[var.selected_vm]", root_module)
+        self.assertIn("for vm_name, vm in local.vms : vm_name => vm", root_module)
+        self.assertIn("if var.selected_vm == null || vm_name == var.selected_vm", root_module)
         self.assertIn("local.selected_vms", partitions)
         self.assertIn("admin_user    = local.globals.vm_admin_user", partitions)
         self.assertIn('!endswith(basename(path), ".sops.yaml")', root_module)
-        self.assertIn("vms = tomap({", root_module)
+        self.assertNotIn("vms = tomap({", root_module)
 
     def test_vm_partition_declares_proxmox_vm_resources_from_vm_yaml(self):
         module = (REPO_ROOT / "tofu" / "modules" / "vm-partition" / "main.tf").read_text()
@@ -141,6 +143,7 @@ class TofuGenerationTests(unittest.TestCase):
         self.assertIn("cores = each.value.hardware.cores", module)
         self.assertIn("dedicated = each.value.hardware.memory", module)
         self.assertIn("variable \"admin_user\"", module)
+        self.assertIn("type = any", module)
         self.assertIn("name: ${var.admin_user}", module)
         self.assertIn("each.value.ssh_public_key", module)
         self.assertIn("run Prepare first", module)
