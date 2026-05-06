@@ -42,9 +42,33 @@ _Avoid_: ISO, base image.
 A deployed application or co-located group of containers, declared in `inventory/services/<svc>.yaml`. Runs inside a VM. Substrate is either Quadlet (default) or Native.
 _Avoid_: app, workload; "systemd service" (always qualify as "systemd unit").
 
+**Service Group**:
+A named set of one or more Services on the same VM that intentionally share a VM-local Podman network for private Service-to-Service communication.
+_Avoid_: stack (too Compose-specific), app suite.
+
 **Backend**:
 The VM (and TCP port) that the Ingress reverse-proxies a Service to. Declared as `backend.vm` and `backend.port`. Becomes a list when the Service is HA.
 _Avoid_: upstream (overloaded with apt/git senses).
+
+**Published Port**:
+A VM-local port exposed by a Quadlet container for another VM or the Ingress to reach; defaults to loopback binding and TCP unless declared otherwise.
+_Avoid_: exposed port (overloaded between container metadata and host publishing).
+
+**Service Data Directory**:
+The VM-local directory tree under `/srv/services/<service>/` that holds Service-owned bind-mounted data.
+_Avoid_: app folder, container data path.
+
+**Service Data Owner**:
+The numeric UID/GID fortress applies to a Service's Service Data Directory when declared.
+_Avoid_: app user (image-specific), container user.
+
+**Service Path**:
+A path declared by a Service relative to its Service Data Directory.
+_Avoid_: host path (too broad), local volume path.
+
+**Export-backed Volume**:
+A Service container bind mount whose source references a VM Mount's Export and whose target is a container path.
+_Avoid_: NFS volume (the Service references the VM-side Mount, not NFS topology directly).
 
 **Entity**:
 A Host, VM, or Service. The thing each `<entity>.yaml` (and optional `<entity>.sops.yaml`) describes.
@@ -102,11 +126,27 @@ _Avoid_: identity, key (be specific).
 `<entity>.sops.yaml` co-located with `<entity>.yaml`. Holds that entity's encrypted secrets. Sparse — present only when the entity has secrets.
 _Avoid_: secrets file, encrypted store, vault.
 
+**Service Secret**:
+An encrypted value in a Service's Sibling SOPS File that is installed as a Podman secret and consumed through a `_FILE` environment variable.
+_Avoid_: environment secret (the secret value is not an environment variable).
+
 ### Service substrate
 
 **Quadlet**:
 A systemd unit declaring a Podman container, network, or volume; rendered onto the VM from the Service yaml. The default service substrate.
 _Avoid_: pod, compose service.
+
+**Quadlet Fragment**:
+A native Quadlet sidecar fragment for options fortress does not model directly, validated so it cannot override fortress-owned invariants.
+_Avoid_: raw config (too vague), compose override.
+
+**Container Dependency**:
+A same-Service start-order and stop-coupling relationship between Quadlet containers.
+_Avoid_: readiness check, health dependency.
+
+**Container Alias**:
+The VM-local Podman network DNS name for a Service container, taken from the container's declared name.
+_Avoid_: hostname (reserved for Service and VM naming).
 
 **Native (Deploy)**:
 The escape-hatch substrate: an apt package plus a systemd unit, configured by Ansible templates. Used when a Service is genuinely better not containerised (Caddy is the canonical case).
@@ -134,12 +174,14 @@ A named NFS share from TrueNAS (e.g. `media`, `documents`, `pbs`), declared once
 _Avoid_: share; mount (the VM-side artefact, not the NAS-side declaration).
 
 **Mount**:
-A systemd `.mount` unit on a VM that mounts an Export at a declared path. Ordering anchor for Quadlet containers via `requires_mounts:`.
+A systemd `.mount` unit on a VM that mounts an Export at a declared path. Ordering anchor for Quadlet containers via Export-backed Volumes.
 
 ## Relationships
 
 - A **Host** runs zero or more **VMs** and holds zero or more **Templates**.
 - A **VM** is provisioned from one **Template** and runs zero or more **Services**.
+- A **Service Group** contains one or more **Services** on the same **VM**.
+- A **Service Group** name is globally unique within the **Inventory**.
 - VMIDs `100`-`8899` are for ordinary **VMs**, `8900`-`8999` are for **Operational VMs**, and `9000`-`9999` are for **Templates**.
 - VM names beginning with `tmp-` are reserved for generated temporary **VMs** and must not be checked in as ordinary Inventory.
 - A **Template Verification VM** is provisioned from exactly one **Template** on exactly one **Host** and destroyed after verification.
@@ -147,8 +189,25 @@ A systemd `.mount` unit on a VM that mounts an Export at a declared path. Orderi
 - A **Template Verification Policy** defines the reusable slot from which each **Template Verification VM** is generated.
 - An **Acceptance Test** may create or configure a disposable **Operational VM** when the contract can only be proven through live infrastructure.
 - A **Service** has one **Backend** **VM** (a list when HA is needed).
+- A **Service** may belong to at most one **Service Group**.
+- A Quadlet **Service**'s **Backend** port must match exactly one **Published Port**.
+- A **Published Port** may use TCP, UDP, or both; only TCP-capable Published Ports may satisfy a **Backend**.
+- **Ingress** is HTTP-family routing only; non-HTTP Published Ports are exposed directly on the **Backend** VM rather than through Caddy.
+- A **Published Port** must opt into **Ingress** routing explicitly; direct VM exposure is deliberate through its bind address.
+- A **Service Data Directory** belongs to exactly one **Service** and is the default root for Service-owned bind mounts.
+- A **Service Data Owner** applies only to Service-owned data; Export-backed Volume ownership follows the VM Mount and NAS ownership convention.
+- A **Service Path** is always explicit in Service yaml when a container uses Service-owned bind-mounted data.
+- **Service Data Directory** contents are never pruned by Service deployment; Service renames and Service Path changes require explicit data migration.
+- An **Export-backed Volume** automatically depends on the corresponding **Mount** before the container starts.
+- An **Export-backed Volume** may bind the root of a **Mount** by omitting its source subpath.
+- Fortress models Quadlet fields only when they enforce fortress invariants; other native Quadlet options belong in **Quadlet Fragments**.
+- A **Container Dependency** does not prove application readiness; readiness remains the Service application's responsibility unless modeled separately later.
+- A **Container Alias** must be unique within its Podman network; rendered container identity remains service-scoped as `<service>-<container>`.
+- Fortress-owned runtime artifacts use a `fortress-` prefix; Podman container and systemd unit identity is `fortress-<service>-<container>`, while the **Container Alias** remains the declared container name.
 - The **Ingress** **VM** routes traffic to **Services** by hostname.
+- A **Service** needs a hostname only when **Ingress** is enabled.
 - Every **Entity** may have a **Sibling SOPS File**.
+- A **Service Secret** belongs to exactly one **Service** and is installed under a service-scoped Podman secret name.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
 - An **Export** is the NAS-side declaration; a **Mount** is the VM-side systemd unit that consumes one.
 - A declared **Mount** must be active and accessible during **Configure** before later VM configuration or Service deployment may rely on it.
@@ -165,6 +224,6 @@ A systemd `.mount` unit on a VM that mounts an Export at a declared path. Orderi
 - **"node" vs "host"**: In Proxmox parlance "node" is a cluster member; here we have no cluster, so "node" only ever means the PVE-internal identity (`pve_node_name`). All operator prose uses **Host**.
 - **"template"**: Overloaded between the **Template** (a Proxmox VM marked `template: 1`), the `vm-templates/<name>.yaml` recipe that produces it, and Jinja templates inside Ansible roles. The first two are the same concept at recipe and instance layers; Jinja templates should always be qualified ("Jinja template" or "config template").
 - **"service"**: Overloaded with "systemd service unit". A **Service** in this project is a deployed app (one yaml under `inventory/services/`); a systemd service unit is always qualified as "systemd unit".
-- **Hostname conventions**: A **Service**'s `hostname` is the FQDN (`photos.fearn.cloud`); a **VM**'s `cloud_init.hostname` is the short form (`web01`), with FQDN derived as `<short>.fearn.cloud`. The split is intentional (a VM hosts one well-known FQDN; a Service may publish many) but easy to reverse by accident.
+- **Hostname conventions**: A **Service**'s `hostname` is the end-user FQDN (`photos.fearn.cloud`); a **VM**'s `cloud_init.hostname` is the short form (`web01`), with FQDN derived as `<short>.fearn.cloud`; a **Container Alias** is private Podman network DNS. The split is intentional, but easy to reverse by accident.
 - **`ingress.exposure` enum**: Only `lan_only` appears in [docs/architecture.md](docs/architecture.md). Whether `internet_exposed` (or similar) is a planned value, and what it would imply for the Caddy/Cloudflare wiring, is unresolved.
-- **Multi-VM Backend**: A Service has one `backend.vm` today; the schema allows a list "when needed" for HA, but no Service declares one yet and the cross-file validator currently handles only the singular form.
+- **Multi-VM Backend**: Deferred. A **Service** has exactly one **Backend** for the initial Quadlet and Ingress implementation; HA Backend semantics will be designed when the Ingress supports multiple Backends.

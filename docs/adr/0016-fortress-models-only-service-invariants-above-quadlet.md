@@ -1,0 +1,5 @@
+# Fortress models only service invariants above Quadlet
+
+Service yaml for `deploy.type: quadlet` uses fortress-owned fields only where fortress must validate or wire project concepts: Backend ports, Service Data Directories, Export-backed Volumes, Sibling SOPS File secrets, image pinning, and cross-file references. Native Quadlet options that do not affect those invariants belong in validated Quadlet Fragment sidecar files rather than being re-modeled as a parallel application configuration language.
+
+This keeps Services reviewable against fortress's Inventory model without trying to replace Quadlet, Podman, or systemd. The rejected alternatives are raw replacement Quadlet files, which cannot express fortress cross-file invariants, and a rich Compose-like schema, which would make fortress responsible for re-inventing container configuration semantics. Quadlet Fragments use native Quadlet syntax, but fortress validates that they do not override fortress-owned keys such as image, container identity, network, published ports, volumes, secrets, or generated dependencies.
