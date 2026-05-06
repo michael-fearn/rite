@@ -1,3 +1,12 @@
+- name: Install NFS client utilities
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+    update_cache: true
+  when:
+    - (fortress_vm.nfs_mounts | default([])) | length > 0
+    - not (fortress_skip_nfs_client_install | default(false))
+
 - name: Ensure systemd unit directory exists
   ansible.builtin.file:
     path: "{{ fortress_systemd_unit_dir | default('/etc/systemd/system') }}"

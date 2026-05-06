@@ -16,7 +16,7 @@ NAS topology declared once globally; per-VM NFS mount declarations reference exp
 - [x] UID/GID convention documented in `runbooks/nas-truenas.md` alongside required TrueNAS-side dataset ownership steps
 - [x] Cross-file validator checks NFS export name references resolve against global exports
 - [x] `vm-up` workflow extended to write mount units when present
-- [x] Demo: a test VM with declared mount has a functional, systemd-managed NFS mount
+- [ ] Demo: a test VM with declared mount has a functional, systemd-managed NFS mount
 
 ## Blocked by
 

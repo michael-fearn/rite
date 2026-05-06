@@ -2,6 +2,8 @@
 
 Fortress keeps NAS topology in `inventory/group_vars/all.yaml` under `nas`. VMs declare `nfs_mounts` by export name, and `vm-configure` renders those declarations as systemd `.mount` units on the VM.
 
+Use the TrueNAS share address for `nas.server`, not the management UI address. In the current topology, TrueNAS management is `10.10.0.15` and NFS exports are served from the infra share address `10.40.0.15`.
+
 ## UID/GID convention
 
 Use the `nas.uid_gid_map` block as the shared ownership contract between TrueNAS datasets and VM workloads. Each key names the export/workload convention, and each value records the numeric `uid` and `gid` expected to own files for that dataset.

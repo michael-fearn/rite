@@ -19,5 +19,5 @@ class NASTrueNASRunbookTests(unittest.TestCase):
         demo = (REPO_ROOT / "inventory" / "vms" / "wintermute-demo.yaml").read_text()
 
         self.assertIn("nfs_mounts:", demo)
-        self.assertIn("export: media", demo)
-        self.assertIn("mount_point: /mnt/media", demo)
+        self.assertIn("export: test", demo)
+        self.assertIn("mount_point: /mnt/test", demo)
