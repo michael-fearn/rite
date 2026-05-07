@@ -14,6 +14,18 @@
       "additionalProperties": false,
       "required": ["server", "exports"],
       "properties": {
+        "endpoints": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["address"],
+            "properties": {
+              "address": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "server": { "type": "string", "minLength": 1 },
         "default_options": { "type": "array", "items": { "type": "string" } },
         "exports": {

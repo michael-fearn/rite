@@ -77,10 +77,13 @@ fortress/
 │   │   ├── _schema.json
 │   │   ├── _example.yaml
 │   │   └── <vm>.yaml + <vm>.sops.yaml
-│   └── services/
+│   ├── services/
+│   │   ├── _schema.json
+│   │   ├── _example.yaml
+│   │   └── <svc>.yaml [+ <svc>.sops.yaml]
+│   └── datasets/
 │       ├── _schema.json
-│       ├── _example.yaml
-│       └── <svc>.yaml [+ <svc>.sops.yaml]
+│       └── <dataset>.yaml
 │
 ├── vm-templates/                            # template recipes (not inventory)
 │   ├── _schema.json
@@ -142,7 +145,7 @@ fortress/
 
 ## 5. Inventory Model — yaml-as-source-of-truth
 
-The core pattern: every managed entity (host, VM, service, template) is a flat per-entity YAML file. The file IS the source of truth. Adding an entity = adding one file. There is no template-rendering layer above the YAML.
+The core pattern: every managed Entity (Host, VM, Service, Template, Dataset) is a flat per-Entity YAML file. The file IS the source of truth. Adding an Entity = adding one file. There is no template-rendering layer above the YAML.
 
 **Why flat YAML over Jinja+vars or constructed inventories**: indirection that feels clean on day one becomes a debugging tax on day ninety. The flat YAML is the contract; a JSON Schema enforces shape; the inventory plugin reads it directly.
 
@@ -633,12 +636,13 @@ VMs can mount NAS Datasets from TrueNAS through derived Shares. Ordinary Dataset
 
 ```yaml
 nas:
-  servers:
+  endpoints:
     truenas:
       address: 10.40.0.15
-      protocols:
-        nfs:
-          default_options: [nfsvers=4.2, soft, _netdev]
+  server: 10.40.0.15
+  default_options: [nfsvers=4.2, soft, _netdev]
+  exports:
+    media: /mnt/pool/media
 ```
 
 Global NAS topology names NAS endpoints and protocol defaults. Dataset declarations hold durable data paths and ownership.
@@ -753,7 +757,7 @@ Always show the selected-VM plan before apply. Interactive `vm-up` runs require 
 
 ### 15.1. JSON Schema per inventory directory
 
-`inventory/hosts/_schema.json`, `inventory/vms/_schema.json`, `inventory/services/_schema.json`, `vm-templates/_schema.json`. Each yaml file validated against its schema by `check-jsonschema` in `make validate` and pre-commit.
+`inventory/hosts/_schema.json`, `inventory/vms/_schema.json`, `inventory/services/_schema.json`, `inventory/datasets/_schema.json`, and `inventory/templates/_schema.json`. Each yaml file validated against its schema by `check-jsonschema` in `make validate` and pre-commit.
 
 Catches typos and shape errors at validate-time (fast feedback) instead of at play-time.
 
@@ -766,6 +770,9 @@ JSON Schema is per-file; some constraints span files. `scripts/validate.sh` invo
 - No two services declare the same `hostname`.
 - VM `placement.host` references an existing `inventory/hosts/<host>.yaml`.
 - VM `source.template` exists in `vm-templates/`.
+- Dataset names are globally unique.
+- Dataset `nas` references a named NAS endpoint in global topology.
+- Ordinary fleet Inventory rejects `lifecycle: ephemeral`; Acceptance Test inventory must opt into it explicitly.
 - VM `mounts[].dataset` exists in `inventory/datasets/`.
 - Service Share-backed Volumes reference a Mount Name declared on the Service's Backend VM.
 

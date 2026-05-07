@@ -1,6 +1,6 @@
 # Dataset inventory and validation
 
-Status: ready-for-agent
+Status: done
 
 ## What to build
 
@@ -8,11 +8,11 @@ Add first-class Dataset inventory so fortress can represent adopted NAS data wit
 
 ## Acceptance criteria
 
-- [ ] `inventory/datasets/_schema.json` validates Dataset files with required `name`, `nas`, `path`, `lifecycle`, and adopted owner UID/GID.
-- [ ] Inventory loading includes Datasets alongside Hosts, VMs, Services, and Templates.
-- [ ] Cross-file validation enforces globally unique Dataset names and rejects `lifecycle: ephemeral` in ordinary fleet inventory.
-- [ ] Existing tests and fixtures cover valid adopted Datasets, invalid missing owner, invalid unknown NAS endpoint, and invalid ordinary ephemeral Dataset.
-- [ ] Documentation examples in `docs/architecture.md` and `runbooks/nas-truenas.md` remain consistent with the implemented schema.
+- [x] `inventory/datasets/_schema.json` validates Dataset files with required `name`, `nas`, `path`, `lifecycle`, and adopted owner UID/GID.
+- [x] Inventory loading includes Datasets alongside Hosts, VMs, Services, and Templates.
+- [x] Cross-file validation enforces globally unique Dataset names and rejects `lifecycle: ephemeral` in ordinary fleet inventory.
+- [x] Existing tests and fixtures cover valid adopted Datasets, invalid missing owner, invalid unknown NAS endpoint, and invalid ordinary ephemeral Dataset.
+- [x] Documentation examples in `docs/architecture.md` and `runbooks/nas-truenas.md` remain consistent with the implemented schema.
 
 ## Blocked by
 
@@ -45,15 +45,15 @@ Ephemeral Datasets are allowed only for Acceptance Test inventory. Ordinary flee
 - Global NAS topology should be interpreted consistently with the documented Dataset model. The current repo still has legacy `nas.server`/`nas.exports` examples in some fixtures; align the Dataset endpoint validation and docs/fixtures so the accepted endpoint shape is unambiguous.
 
 **Acceptance criteria:**
-- [ ] `inventory/datasets/_schema.json` validates valid adopted Dataset declarations.
-- [ ] Dataset schema validation rejects adopted Datasets that omit `owner.uid` or `owner.gid`.
-- [ ] Inventory loading exposes Datasets alongside Hosts, VMs, Services, Templates, global vars, and the Template Verification Policy.
-- [ ] Cross-file validation rejects duplicate Dataset names across loaded Dataset files.
-- [ ] Cross-file validation rejects Datasets whose `nas` value does not reference a known NAS endpoint.
-- [ ] Cross-file validation rejects `lifecycle: ephemeral` in ordinary fleet Inventory.
-- [ ] Acceptance-test fixture inventory can represent `lifecycle: ephemeral` without weakening the ordinary fleet Inventory rule.
-- [ ] Existing tests and fixtures cover valid adopted Datasets, invalid missing owner, invalid unknown NAS endpoint, invalid duplicate Dataset name, and invalid ordinary ephemeral Dataset.
-- [ ] Documentation examples in `docs/architecture.md` and `runbooks/nas-truenas.md` remain consistent with the implemented Dataset schema and NAS topology shape.
+- [x] `inventory/datasets/_schema.json` validates valid adopted Dataset declarations.
+- [x] Dataset schema validation rejects adopted Datasets that omit `owner.uid` or `owner.gid`.
+- [x] Inventory loading exposes Datasets alongside Hosts, VMs, Services, Templates, global vars, and the Template Verification Policy.
+- [x] Cross-file validation rejects duplicate Dataset names across loaded Dataset files.
+- [x] Cross-file validation rejects Datasets whose `nas` value does not reference a known NAS endpoint.
+- [x] Cross-file validation rejects `lifecycle: ephemeral` in ordinary fleet Inventory.
+- [x] Acceptance-test fixture inventory can represent `lifecycle: ephemeral` without weakening the ordinary fleet Inventory rule.
+- [x] Existing tests and fixtures cover valid adopted Datasets, invalid missing owner, invalid unknown NAS endpoint, invalid duplicate Dataset name, and invalid ordinary ephemeral Dataset.
+- [x] Documentation examples in `docs/architecture.md` and `runbooks/nas-truenas.md` remain consistent with the implemented Dataset schema and NAS topology shape.
 
 **Out of scope:**
 - Implementing NAS Reconcile, TrueNAS API calls, Share derivation, or Share mutation.

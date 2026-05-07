@@ -1,5 +1,8 @@
 domain: fearn.cloud
 nas:
+  endpoints:
+    truenas:
+      address: 10.0.20.10
   server: 10.0.20.10
   exports:
     media: /mnt/pool/media

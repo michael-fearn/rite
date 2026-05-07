@@ -24,6 +24,70 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
         self.assertEqual(model.template_verification_policy["vmid"], 8901)
 
+    def test_inventory_model_loads_datasets(self):
+        model = load_inventory_tree(FIXTURES / "inventory_valid")
+
+        self.assertEqual(model.datasets["media"]["path"], "/mnt/pool/media")
+
+    def test_dataset_names_must_be_unique(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "photos.yaml").write_text(
+                "name: media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/photos\n"
+                "lifecycle: adopted\n"
+                "owner:\n"
+                "  uid: 1000\n"
+                "  gid: 1000\n"
+            )
+
+            self.assertIn("duplicate_dataset_name", {error.code for error in validate_inventory_tree(root)})
+
+    def test_dataset_nas_endpoint_must_exist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: media\n"
+                "nas: missing-nas\n"
+                "path: /mnt/pool/media\n"
+                "lifecycle: adopted\n"
+                "owner:\n"
+                "  uid: 1000\n"
+                "  gid: 1000\n"
+            )
+
+            self.assertIn("missing_dataset_nas_endpoint", {error.code for error in validate_inventory_tree(root)})
+
+    def test_ordinary_inventory_rejects_ephemeral_datasets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/media\n"
+                "lifecycle: ephemeral\n"
+            )
+
+            self.assertIn("ordinary_ephemeral_dataset", {error.code for error in validate_inventory_tree(root)})
+
+    def test_acceptance_inventory_allows_ephemeral_datasets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/media\n"
+                "lifecycle: ephemeral\n"
+            )
+
+            codes = {error.code for error in validate_inventory_tree(root, allow_ephemeral_datasets=True)}
+            self.assertNotIn("ordinary_ephemeral_dataset", codes)
+
     def test_service_backend_vm_must_exist(self):
         self.assertIn("missing_service_backend_vm", self.codes_for("inventory_invalid/missing-service-vm"))
 

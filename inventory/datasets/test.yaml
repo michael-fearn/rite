@@ -1,0 +1,7 @@
+name: test
+nas: truenas
+path: /mnt/tank/test
+lifecycle: adopted
+owner:
+  uid: 1000
+  gid: 1000

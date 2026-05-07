@@ -4,6 +4,13 @@ Fortress models NAS data as protected Datasets and disposable Shares. Ordinary D
 
 Use the TrueNAS share address for the NAS endpoint, not the management UI address. In the current topology, TrueNAS management is `10.10.0.15` and NFS Shares are served from the infra share address `10.40.0.15`.
 
+```yaml
+nas:
+  endpoints:
+    truenas:
+      address: 10.40.0.15
+```
+
 ## UID/GID convention
 
 Keep NAS-facing numeric identities in `inventory/group_vars/all.yaml` under `nas.uid_gid_map` so VMs and TrueNAS agree on ownership by number:

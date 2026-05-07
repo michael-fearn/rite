@@ -10,16 +10,22 @@ class ValidationError:
     message: str
 
 
-def validate_inventory_tree(root):
-    return validate_inventory_model(load_inventory_tree(root))
+def validate_inventory_tree(root, allow_ephemeral_datasets=False):
+    return validate_inventory_model(
+        load_inventory_tree(root),
+        allow_ephemeral_datasets=allow_ephemeral_datasets,
+    )
 
 
-def validate_inventory_model(model):
+def validate_inventory_model(model, allow_ephemeral_datasets=False):
     errors = []
     errors.extend(_validate_service_backends(model))
     errors.extend(_validate_service_hostnames(model))
     errors.extend(_validate_vm_inventory_policy(model))
     errors.extend(_validate_vm_refs(model))
+    errors.extend(_validate_dataset_names(model))
+    errors.extend(_validate_dataset_nas_refs(model))
+    errors.extend(_validate_dataset_lifecycle_policy(model, allow_ephemeral_datasets=allow_ephemeral_datasets))
     errors.extend(_validate_nfs_exports(model))
     errors.extend(_validate_vm_host_resources(model))
     return errors
@@ -142,6 +148,58 @@ def _validate_vm_refs(model):
                     "missing_vm_template",
                     f"inventory/vms/{vm_name}.yaml.source.template",
                     f"VM {vm_name} references missing Template {template_name}",
+                )
+            )
+    return errors
+
+
+def _validate_dataset_names(model):
+    errors = []
+    seen = {}
+    for dataset_file, dataset in model.datasets.items():
+        dataset_name = dataset.get("name")
+        if not dataset_name:
+            continue
+        if dataset_name in seen:
+            errors.append(
+                ValidationError(
+                    "duplicate_dataset_name",
+                    f"inventory/datasets/{dataset_file}.yaml.name",
+                    f"Datasets {seen[dataset_name]} and {dataset_file} both declare name {dataset_name}",
+                )
+            )
+        else:
+            seen[dataset_name] = dataset_file
+    return errors
+
+
+def _validate_dataset_nas_refs(model):
+    errors = []
+    endpoints = set((model.globals.get("nas", {}).get("endpoints") or {}).keys())
+    for dataset_file, dataset in model.datasets.items():
+        nas_name = dataset.get("nas")
+        if nas_name and nas_name not in endpoints:
+            errors.append(
+                ValidationError(
+                    "missing_dataset_nas_endpoint",
+                    f"inventory/datasets/{dataset_file}.yaml.nas",
+                    f"Dataset {dataset.get('name', dataset_file)} references missing NAS endpoint {nas_name}",
+                )
+            )
+    return errors
+
+
+def _validate_dataset_lifecycle_policy(model, allow_ephemeral_datasets=False):
+    errors = []
+    if allow_ephemeral_datasets:
+        return errors
+    for dataset_file, dataset in model.datasets.items():
+        if dataset.get("lifecycle") == "ephemeral":
+            errors.append(
+                ValidationError(
+                    "ordinary_ephemeral_dataset",
+                    f"inventory/datasets/{dataset_file}.yaml.lifecycle",
+                    f"Dataset {dataset.get('name', dataset_file)} uses ephemeral lifecycle outside Acceptance Test inventory",
                 )
             )
     return errors

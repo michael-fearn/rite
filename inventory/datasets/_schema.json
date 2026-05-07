@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "nas", "path", "lifecycle"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "nas": { "type": "string", "minLength": 1 },
+    "path": { "type": "string", "pattern": "^/" },
+    "lifecycle": { "enum": ["adopted", "ephemeral"] },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uid", "gid"],
+      "properties": {
+        "uid": { "type": "integer", "minimum": 0 },
+        "gid": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "lifecycle": { "const": "adopted" } },
+        "required": ["lifecycle"]
+      },
+      "then": { "required": ["owner"] }
+    }
+  ]
+}

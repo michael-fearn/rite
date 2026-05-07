@@ -11,6 +11,7 @@ SCHEMA_CASES = [
     ("Host", "inventory/hosts/_schema.json", "tests/fixtures/schema/hosts"),
     ("VM", "inventory/vms/_schema.json", "tests/fixtures/schema/vms"),
     ("Service", "inventory/services/_schema.json", "tests/fixtures/schema/services"),
+    ("Dataset", "inventory/datasets/_schema.json", "tests/fixtures/schema/datasets"),
     ("Template", "inventory/templates/_schema.json", "tests/fixtures/schema/templates"),
     (
         "Template Verification Policy",
@@ -43,6 +44,7 @@ class InventorySchemaTests(unittest.TestCase):
             "hosts": "proxmox",
             "vms": "placement",
             "services": "backend",
+            "datasets": "owner",
             "templates": "source",
             "template_verification_policy": "storage_by_host",
             "group_vars": "nas",

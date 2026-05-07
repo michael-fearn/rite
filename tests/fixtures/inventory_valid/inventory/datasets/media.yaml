@@ -1,0 +1,7 @@
+name: media
+nas: truenas
+path: /mnt/pool/media
+lifecycle: adopted
+owner:
+  uid: 1000
+  gid: 1000
