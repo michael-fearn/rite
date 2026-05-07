@@ -10,6 +10,7 @@ class InventoryModel:
     vms: dict
     services: dict
     datasets: dict
+    nas_endpoints: dict
     templates: dict
     template_verification_policy: dict
     globals: dict
@@ -23,6 +24,7 @@ def load_inventory_tree(root):
         vms=_load_entity_dir(inventory_root / "vms"),
         services=_load_entity_dir(inventory_root / "services"),
         datasets=_load_entity_dir(inventory_root / "datasets"),
+        nas_endpoints=_load_entity_dir(inventory_root / "nas"),
         templates=_load_entity_dir(inventory_root / "templates"),
         template_verification_policy=_load_optional_yaml(inventory_root / "template-verification-policy.yaml"),
         globals=_load_optional_yaml(inventory_root / "group_vars" / "all.yaml"),

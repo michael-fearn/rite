@@ -632,20 +632,17 @@ Not routine. PBS chunks can't be re-encrypted in place — rotation = create new
 
 VMs can mount NAS Datasets from TrueNAS through derived Shares. Ordinary Datasets are adopted and protected; Shares are disposable access surfaces derived from VM Mount and Service consumption declarations.
 
-### 13.1. Global NAS topology (`group_vars/all.yaml`)
+### 13.1. NAS Endpoint declarations
 
 ```yaml
-nas:
-  endpoints:
-    truenas:
-      address: 10.40.0.15
-  server: 10.40.0.15
-  default_options: [nfsvers=4.2, soft, _netdev]
-  exports:
-    media: /mnt/pool/media
+# inventory/nas/truenas.yaml
+name: truenas
+management_address: 10.10.0.15
+share_address: 10.40.0.15
+api_token_env: TRUENAS_API_TOKEN
 ```
 
-Global NAS topology names NAS endpoints and protocol defaults. Dataset declarations hold durable data paths and ownership.
+NAS Endpoint declarations name external NAS systems. The Management Address is used by NAS Reconcile, the Share Address is used by VM Mounts, and Dataset declarations hold durable data paths and ownership. Global NAS protocol defaults remain in `inventory/group_vars/all.yaml`.
 
 ### 13.2. Dataset declarations
 
@@ -757,7 +754,7 @@ Always show the selected-VM plan before apply. Interactive `vm-up` runs require 
 
 ### 15.1. JSON Schema per inventory directory
 
-`inventory/hosts/_schema.json`, `inventory/vms/_schema.json`, `inventory/services/_schema.json`, `inventory/datasets/_schema.json`, and `inventory/templates/_schema.json`. Each yaml file validated against its schema by `check-jsonschema` in `make validate` and pre-commit.
+`inventory/hosts/_schema.json`, `inventory/vms/_schema.json`, `inventory/services/_schema.json`, `inventory/datasets/_schema.json`, `inventory/nas/_schema.json`, and `inventory/templates/_schema.json`. Each yaml file validated against its schema by `check-jsonschema` in `make validate` and pre-commit.
 
 Catches typos and shape errors at validate-time (fast feedback) instead of at play-time.
 

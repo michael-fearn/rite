@@ -75,7 +75,7 @@ A Host, VM, Service, or Dataset. The thing each `<entity>.yaml` (and optional `<
 _Avoid_: object, record.
 
 **Inventory**:
-The set of per-entity YAML files at `inventory/{hosts,vms,services,datasets}/`. Source of truth for all declared state.
+The set of per-entity YAML files at `inventory/{hosts,vms,services,datasets,nas}/`. Source of truth for all declared state.
 _Avoid_: catalog, registry.
 
 ### Operator and ceremony
@@ -177,6 +177,30 @@ _Avoid_: PVE backup (a separate Proxmox feature).
 PBS's storage location; an NFS Share from TrueNAS, mounted into the PBS VM.
 _Avoid_: backup pool.
 
+**NAS Endpoint**:
+A named external NAS system fortress can reconcile against.
+_Avoid_: NAS server (too broad), TrueNAS host (implementation-specific).
+
+**Management Address**:
+The address fortress uses to reach a NAS Endpoint's management API.
+_Avoid_: NAS address, server address.
+
+**Share Address**:
+The address VMs use to consume Shares from a NAS Endpoint.
+_Avoid_: NAS address, management address.
+
+**NAS Reconcile Credential**:
+An operator-provided NAS API credential used by NAS Reconcile to inspect Datasets and manage Fortress-owned Shares.
+_Avoid_: NAS admin token, TrueNAS root credential.
+
+**Acceptance NAS Credential**:
+An operator-provided NAS API credential used only by Acceptance Tests that must create or destroy Ephemeral Datasets.
+_Avoid_: test NAS admin token, ordinary NAS Reconcile Credential.
+
+**Credential Source**:
+The non-secret location from which an operator workflow obtains a credential.
+_Avoid_: credential value, secret source.
+
 **Dataset**:
 A durable TrueNAS Dataset whose contents are protected independently from any access surface.
 _Avoid_: share, export, mount.
@@ -250,6 +274,11 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - Every **Entity** may have a **Sibling SOPS File**.
 - A **Service Secret** belongs to exactly one **Service** and is installed under a service-scoped Podman secret name.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
+- A **NAS Endpoint** is an **Entity**.
+- A **NAS Endpoint** has zero or more **Datasets**.
+- A **NAS Endpoint** has one **Management Address** and one **Share Address**.
+- A **NAS Reconcile Credential** belongs to exactly one **NAS Endpoint**.
+- An **Acceptance NAS Credential** may mutate **Ephemeral Datasets** but is not used for ordinary fleet **NAS Reconcile**.
 - NAS server and protocol defaults are global topology; **Datasets** are per-entity Inventory.
 - **NAS Reconcile** validates **Datasets** and converges **Shares**.
 - **NAS Reconcile** is conceptually API-backed; its first implementation may be a read-only **NAS Reconcile Plan**.

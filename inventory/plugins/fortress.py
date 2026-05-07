@@ -93,6 +93,7 @@ class InventoryModule(BaseInventoryPlugin):
         self.inventory.set_variable("all", "fortress_globals", model.globals)
         self.inventory.set_variable("all", "fortress_services", model.services)
         self.inventory.set_variable("all", "fortress_datasets", model.datasets)
+        self.inventory.set_variable("all", "fortress_nas_endpoints", model.nas_endpoints)
         self.inventory.set_variable("all", "fortress_templates", model.templates)
 
     def _set_sibling_ssh_key_var(self, entity_name, sops_path):

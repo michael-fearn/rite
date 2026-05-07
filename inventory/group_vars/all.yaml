@@ -7,16 +7,10 @@ dns_resolvers:
   - 1.0.0.1
 vm_admin_user: admin
 nas:
-  endpoints:
-    truenas:
-      address: 10.40.0.15
-  server: 10.40.0.15
   default_options:
     - nfsvers=4.2
     - soft
     - _netdev
-  exports:
-    test: /mnt/tank/test
   uid_gid_map:
     test:
       uid: 1000

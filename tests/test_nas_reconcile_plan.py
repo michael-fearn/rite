@@ -202,15 +202,6 @@ class NasReconcilePlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
-            group_vars = root / "inventory" / "group_vars" / "all.yaml"
-            group_vars.write_text(
-                group_vars.read_text().replace(
-                    "      address: 10.0.20.10\n",
-                    "      address: 10.0.20.10\n"
-                    "      api_token_env: TRUENAS_API_TOKEN\n"
-                    "      api_token: super-secret-token\n",
-                )
-            )
             reality_path = root / "truenas-reality.json"
             reality_path.write_text(
                 json.dumps(
@@ -239,11 +230,51 @@ class NasReconcilePlanTests(unittest.TestCase):
             self.assertEqual(
                 plan["connection"]["truenas"],
                 {
-                    "address": "10.0.20.10",
+                    "management_address": "10.0.10.10",
+                    "share_address": "10.0.20.10",
                     "api_token_env": "TRUENAS_API_TOKEN",
-                    "credentials": "redacted",
+                    "credentials": "operator_environment",
                 },
             )
+
+    def test_inline_connection_secrets_are_still_redacted_from_plan_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            nas_endpoint = root / "inventory" / "nas" / "truenas.yaml"
+            nas_endpoint.write_text(
+                nas_endpoint.read_text().replace(
+                    "share_address: 10.0.20.10\n",
+                    "share_address: 10.0.20.10\n"
+                    "api_token: super-secret-token\n",
+                )
+            )
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {"path": "/mnt/pool/media", "owner": {"uid": 1000, "gid": 1000}},
+                        ],
+                        "nfs_shares": [],
+                    }
+                )
+            )
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "nas-reconcile-plan"), "--reality-json", str(reality_path)],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotIn("super-secret-token", result.stdout)
+            plan = json.loads(result.stdout)
+            self.assertEqual(plan["connection"]["truenas"]["credentials"], "redacted")
 
     def test_apply_creates_missing_fortress_owned_nfs_share_with_marker(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -61,6 +61,12 @@ class FortressInventoryPluginTests(unittest.TestCase):
 
         self.assertEqual(media01["fortress_datasets"]["media"]["name"], "media")
 
+    def test_inventory_plugin_exposes_nas_endpoints_to_ansible(self):
+        inventory = self.load_inventory()
+        media01 = ansible_value(inventory["_meta"]["hostvars"]["media01"])
+
+        self.assertEqual(media01["fortress_nas_endpoints"]["truenas"]["share_address"], "10.0.20.10")
+
     def test_inventory_plugin_materializes_sibling_sops_ssh_key_to_tmpfs_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

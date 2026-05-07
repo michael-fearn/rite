@@ -247,7 +247,7 @@ def _validate_dataset_names(model):
 
 def _validate_dataset_nas_refs(model):
     errors = []
-    endpoints = set((model.globals.get("nas", {}).get("endpoints") or {}).keys())
+    endpoints = set(model.nas_endpoints.keys())
     for dataset_file, dataset in model.datasets.items():
         nas_name = dataset.get("nas")
         if nas_name and nas_name not in endpoints:

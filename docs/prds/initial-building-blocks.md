@@ -220,7 +220,7 @@ Six **deep modules** with narrow interfaces and significant internal complexity,
 
 5. **Tofu yaml-to-resource bridge** (HCL module). Iterates over the VM yaml directory via `for_each`, builds a multi-aliased provider mapping from the host yaml directory, assembles cloud-init userdata from VM yaml plus the public-key field. The HCL module is the bridge between the declarative yaml inventory and the bpg/proxmox provider's resource API.
 
-6. **JSON Schemas** (declarative). Per-inventory-directory schemas (host, VM, service, template) plus the global vars schema. Validated by `check-jsonschema` per-file in pre-commit.
+6. **JSON Schemas** (declarative). Per-inventory-directory schemas (host, VM, service, NAS endpoint, template) plus the global vars schema. Validated by `check-jsonschema` per-file in pre-commit.
 
 Five **workflow modules** that compose roles into operator-facing playbooks; integration-tested only:
 

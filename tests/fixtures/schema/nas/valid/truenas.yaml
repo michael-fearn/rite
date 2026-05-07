@@ -1,0 +1,4 @@
+name: truenas
+management_address: 10.0.10.10
+share_address: 10.0.20.10
+api_token_env: TRUENAS_API_TOKEN

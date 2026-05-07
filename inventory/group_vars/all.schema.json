@@ -12,28 +12,8 @@
     "nas": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["server", "exports"],
       "properties": {
-        "endpoints": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["address"],
-            "properties": {
-              "address": { "type": "string", "minLength": 1 },
-              "api_token_env": { "type": "string", "minLength": 1 }
-            }
-          }
-        },
-        "server": { "type": "string", "minLength": 1 },
         "default_options": { "type": "array", "items": { "type": "string" } },
-        "exports": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": { "type": "string", "pattern": "^/" }
-        },
         "uid_gid_map": {
           "type": "object",
           "additionalProperties": {

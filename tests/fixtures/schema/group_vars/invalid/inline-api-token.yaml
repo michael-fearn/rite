@@ -1,0 +1,3 @@
+domain: fearn.cloud
+nas:
+  api_token: super-secret-token

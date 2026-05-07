@@ -451,19 +451,25 @@ def _vm_static_addresses(vm):
 
 
 def _redacted_connection(inventory):
-    endpoints = inventory.globals.get("nas", {}).get("endpoints", {}) or {}
+    endpoints = inventory.nas_endpoints
     redacted = {}
     for name, endpoint in sorted(endpoints.items()):
         visible = {}
         has_secret = False
+        credential_source = None
         for key, value in endpoint.items():
+            if key == "name":
+                continue
             if key.endswith("_env"):
                 visible[key] = value
+                credential_source = "operator_environment"
             elif "token" in key or "secret" in key or "password" in key:
                 has_secret = True
             else:
                 visible[key] = value
         if has_secret:
             visible["credentials"] = "redacted"
+        elif credential_source:
+            visible["credentials"] = credential_source
         redacted[name] = visible
     return redacted

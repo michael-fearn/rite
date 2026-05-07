@@ -1,5 +1,5 @@
 {% set dataset = (fortress_datasets.values() | selectattr('name', 'equalto', item.dataset) | first) %}
-{% set nas_endpoint = fortress_globals.nas.endpoints[dataset.nas] %}
+{% set nas_endpoint = fortress_nas_endpoints[dataset.nas] %}
 {% set access_option = 'ro' if item.access == 'read_only' else 'rw' %}
 [Unit]
 Description=Fortress NFS mount for {{ item.dataset }} at {{ item.mount_point }}
@@ -7,7 +7,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Mount]
-What={{ nas_endpoint.address }}:{{ dataset.path }}
+What={{ nas_endpoint.share_address }}:{{ dataset.path }}
 Where={{ item.mount_point }}
 Type=nfs
 Options={{ (fortress_globals.nas.default_options | default([]) + [access_option] + item.options_extra | default([])) | join(',') }}

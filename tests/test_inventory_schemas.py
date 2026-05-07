@@ -12,6 +12,7 @@ SCHEMA_CASES = [
     ("VM", "inventory/vms/_schema.json", "tests/fixtures/schema/vms"),
     ("Service", "inventory/services/_schema.json", "tests/fixtures/schema/services"),
     ("Dataset", "inventory/datasets/_schema.json", "tests/fixtures/schema/datasets"),
+    ("NAS Endpoint", "inventory/nas/_schema.json", "tests/fixtures/schema/nas"),
     ("Template", "inventory/templates/_schema.json", "tests/fixtures/schema/templates"),
     (
         "Template Verification Policy",
@@ -45,6 +46,7 @@ class InventorySchemaTests(unittest.TestCase):
             "vms": "placement",
             "services": "backend",
             "datasets": "owner",
+            "nas": "management_address",
             "templates": "source",
             "template_verification_policy": "storage_by_host",
             "group_vars": "nas",
