@@ -21,6 +21,16 @@ def main():
         action="store_true",
         help="continue when Mount removal, access changes, or mount_point changes are detected",
     )
+    parser.add_argument(
+        "--acceptance-ephemeral-datasets",
+        action="store_true",
+        help="allow Acceptance Test Ephemeral Dataset create/destroy operations",
+    )
+    parser.add_argument(
+        "--destroy-ephemeral-datasets",
+        action="store_true",
+        help="destroy marked Acceptance Test Ephemeral Datasets instead of creating missing ones",
+    )
     args = parser.parse_args()
 
     repo_root = Path(os.environ.get("FORTRESS_ROOT", REPO_ROOT))
@@ -35,6 +45,8 @@ def main():
         apply=args.apply,
         client=client,
         confirm_disruptive_mount_changes=args.confirm_disruptive_mount_changes,
+        acceptance_ephemeral_datasets=args.acceptance_ephemeral_datasets,
+        destroy_ephemeral_datasets=args.destroy_ephemeral_datasets,
     )
     json.dump(plan, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")

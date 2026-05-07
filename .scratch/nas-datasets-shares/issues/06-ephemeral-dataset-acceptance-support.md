@@ -1,6 +1,6 @@
 # Ephemeral Dataset acceptance support
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 
 ## What to build

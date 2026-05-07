@@ -582,6 +582,342 @@ class NasReconcilePlanTests(unittest.TestCase):
                 confirmed["api_operations"],
             )
 
+    def test_acceptance_apply_creates_missing_ephemeral_dataset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(json.dumps({"datasets": [], "nfs_shares": []}))
+
+            result = self._run_reconcile(
+                root,
+                reality_path,
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertIn(
+                {
+                    "action": "create_dataset",
+                    "dataset": {
+                        "name": "acceptance-media",
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "lifecycle": "ephemeral",
+                        "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                    },
+                },
+                output["write_actions"],
+            )
+            self.assertIn(
+                {
+                    "method": "create_dataset",
+                    "dataset": {
+                        "name": "acceptance-media",
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "lifecycle": "ephemeral",
+                        "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                    },
+                },
+                output["api_operations"],
+            )
+
+    def test_acceptance_apply_derives_share_for_ephemeral_dataset_mount(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            vm_path = root / "inventory" / "vms" / "media01.yaml"
+            vm_path.write_text(vm_path.read_text().replace("dataset: media\n", "dataset: acceptance-media\n"))
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "path": "/mnt/pool/fortress-acceptance/media",
+                                "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                            }
+                        ],
+                        "nfs_shares": [],
+                    }
+                )
+            )
+
+            result = self._run_reconcile(
+                root,
+                reality_path,
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertIn(
+                {
+                    "name": "fortress-nfs-acceptance-media-read-write",
+                    "dataset": "acceptance-media",
+                    "path": "/mnt/pool/fortress-acceptance/media",
+                    "protocol": "nfs",
+                    "access": "read_write",
+                    "clients": ["10.0.10.101"],
+                },
+                output["desired_nfs_shares"],
+            )
+            self.assertIn(
+                {
+                    "method": "create_nfs_share",
+                    "share": {
+                        "name": "fortress-nfs-acceptance-media-read-write",
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "protocol": "nfs",
+                        "access": "read_write",
+                        "clients": ["10.0.10.101"],
+                        "fortress_owned": True,
+                        "fortress_marker": "fortress:nfs-share:fortress-nfs-acceptance-media-read-write",
+                    },
+                },
+                output["api_operations"],
+            )
+
+    def test_ordinary_apply_does_not_create_ephemeral_dataset_or_share(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            vm_path = root / "inventory" / "vms" / "media01.yaml"
+            vm_path.write_text(vm_path.read_text().replace("dataset: media\n", "dataset: acceptance-media\n"))
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(json.dumps({"datasets": [], "nfs_shares": []}))
+
+            result = self._run_reconcile(root, reality_path, "--apply")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertEqual(output["write_actions"], [])
+            self.assertEqual(output["api_operations"], [])
+            self.assertEqual(output["desired_nfs_shares"], [])
+
+    def test_acceptance_cleanup_deletes_only_marked_ephemeral_dataset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "path": "/mnt/pool/fortress-acceptance/media",
+                                "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                            }
+                        ],
+                        "nfs_shares": [],
+                    }
+                )
+            )
+
+            result = self._run_reconcile(
+                root,
+                reality_path,
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+                "--destroy-ephemeral-datasets",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertIn(
+                {
+                    "action": "delete_dataset",
+                    "dataset": "acceptance-media",
+                    "path": "/mnt/pool/fortress-acceptance/media",
+                },
+                output["write_actions"],
+            )
+            self.assertIn(
+                {
+                    "method": "delete_dataset",
+                    "dataset": "acceptance-media",
+                    "path": "/mnt/pool/fortress-acceptance/media",
+                },
+                output["api_operations"],
+            )
+
+    def test_acceptance_cleanup_deletes_fortress_owned_share_for_ephemeral_dataset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            vm_path = root / "inventory" / "vms" / "media01.yaml"
+            vm_path.write_text(vm_path.read_text().replace("dataset: media\n", "dataset: acceptance-media\n"))
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "path": "/mnt/pool/fortress-acceptance/media",
+                                "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                            }
+                        ],
+                        "nfs_shares": [
+                            {
+                                "name": "fortress-nfs-acceptance-media-read-write",
+                                "path": "/mnt/pool/fortress-acceptance/media",
+                                "fortress_marker": "fortress:nfs-share:fortress-nfs-acceptance-media-read-write",
+                            }
+                        ],
+                    }
+                )
+            )
+
+            result = self._run_reconcile(
+                root,
+                reality_path,
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+                "--destroy-ephemeral-datasets",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertIn(
+                {
+                    "method": "delete_nfs_share",
+                    "share": "fortress-nfs-acceptance-media-read-write",
+                },
+                output["api_operations"],
+            )
+
+    def test_acceptance_cleanup_refuses_unmanaged_share_overlap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "path": "/mnt/pool/fortress-acceptance/media",
+                                "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                            }
+                        ],
+                        "nfs_shares": [
+                            {
+                                "name": "manual-acceptance-media",
+                                "path": "/mnt/pool/fortress-acceptance/media",
+                            }
+                        ],
+                    }
+                )
+            )
+
+            result = self._run_reconcile(
+                root,
+                reality_path,
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+                "--destroy-ephemeral-datasets",
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertTrue(output["blocked"])
+            self.assertEqual(output["write_actions"], [])
+            self.assertEqual(output["api_operations"], [])
+            self.assertIn(
+                {
+                    "code": "unmanaged_share_overlap",
+                    "share": "manual-acceptance-media",
+                    "dataset": "acceptance-media",
+                    "path": "/mnt/pool/fortress-acceptance/media",
+                    "message": "Unmanaged NFS Share manual-acceptance-media overlaps Ephemeral Dataset acceptance-media",
+                },
+                output["share_findings"],
+            )
+
+    def test_acceptance_cleanup_reports_unmarked_ephemeral_dataset_without_deleting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [{"path": "/mnt/pool/fortress-acceptance/media"}],
+                        "nfs_shares": [],
+                    }
+                )
+            )
+
+            result = self._run_reconcile(
+                root,
+                reality_path,
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+                "--destroy-ephemeral-datasets",
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertTrue(output["blocked"])
+            self.assertEqual(output["write_actions"], [])
+            self.assertEqual(output["api_operations"], [])
+            self.assertIn(
+                {
+                    "code": "unmarked_ephemeral_dataset",
+                    "dataset": "acceptance-media",
+                    "path": "/mnt/pool/fortress-acceptance/media",
+                    "message": (
+                        "Ephemeral Dataset acceptance-media at /mnt/pool/fortress-acceptance/media "
+                        "is not marked as fortress-created; leaving it behind"
+                    ),
+                },
+                output["dataset_findings"],
+            )
+
     def _run_plan(self, root, reality_path):
         result = self._run_reconcile(root, reality_path)
         self.assertIn(result.returncode, {0, 1}, result.stderr)

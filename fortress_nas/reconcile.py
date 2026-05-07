@@ -12,6 +12,12 @@ class RecordingNasClient:
     def __init__(self):
         self.operations = []
 
+    def create_dataset(self, dataset):
+        self.operations.append({"method": "create_dataset", "dataset": dataset})
+
+    def delete_dataset(self, dataset, path):
+        self.operations.append({"method": "delete_dataset", "dataset": dataset, "path": path})
+
     def create_nfs_share(self, share):
         self.operations.append({"method": "create_nfs_share", "share": share})
 
@@ -43,10 +49,24 @@ def build_nas_reconcile_plan(
     apply=False,
     client=None,
     confirm_disruptive_mount_changes=False,
+    acceptance_ephemeral_datasets=False,
+    destroy_ephemeral_datasets=False,
 ):
     dataset_findings = []
+    dataset_write_actions = []
     for dataset in sorted(inventory.datasets.values(), key=lambda item: item.get("name", "")):
-        if dataset.get("lifecycle", "adopted") != "adopted":
+        lifecycle = dataset.get("lifecycle", "adopted")
+        if lifecycle == "ephemeral":
+            if acceptance_ephemeral_datasets:
+                actions, findings = _ephemeral_dataset_write_actions_and_findings(
+                    dataset,
+                    reality,
+                    destroy=destroy_ephemeral_datasets,
+                )
+                dataset_write_actions.extend(actions)
+                dataset_findings.extend(findings)
+            continue
+        if lifecycle != "adopted":
             continue
         dataset_name = dataset.get("name")
         dataset_path = dataset.get("path")
@@ -83,8 +103,13 @@ def build_nas_reconcile_plan(
                 }
             )
 
-    desired_nfs_shares = derive_desired_nfs_shares(inventory)
+    desired_nfs_shares = derive_desired_nfs_shares(
+        inventory,
+        include_ephemeral_datasets=acceptance_ephemeral_datasets and not destroy_ephemeral_datasets,
+    )
     share_findings = _share_findings(desired_nfs_shares, reality.nfs_shares)
+    if acceptance_ephemeral_datasets and destroy_ephemeral_datasets:
+        share_findings.extend(_ephemeral_cleanup_share_findings(inventory, reality.nfs_shares))
     preflight_findings = _mount_preflight_findings(inventory, reality.previous_mounts)
     blocking_codes = {"unmanaged_share_overlap"}
 
@@ -95,7 +120,11 @@ def build_nas_reconcile_plan(
     blocked = blocked or confirmation_required
     write_actions = []
     if apply and not blocked:
-        write_actions = _write_actions(desired_nfs_shares, reality.nfs_shares)
+        share_write_actions = _write_actions(desired_nfs_shares, reality.nfs_shares)
+        if destroy_ephemeral_datasets:
+            write_actions = share_write_actions + dataset_write_actions
+        else:
+            write_actions = dataset_write_actions + share_write_actions
         if client:
             _apply_write_actions(client, write_actions)
 
@@ -114,6 +143,58 @@ def build_nas_reconcile_plan(
     if client:
         result["api_operations"] = client.operations
     return result
+
+
+def _ephemeral_dataset_write_actions_and_findings(dataset, reality, destroy=False):
+    dataset_path = dataset.get("path")
+    if not dataset_path:
+        return [], []
+    actual_dataset = reality.datasets.get(dataset_path)
+    if destroy:
+        if _is_fortress_ephemeral_dataset(dataset, actual_dataset):
+            return [
+                {
+                    "action": "delete_dataset",
+                    "dataset": dataset.get("name"),
+                    "path": dataset_path,
+                }
+            ], []
+        if actual_dataset:
+            dataset_name = dataset.get("name")
+            return [], [
+                {
+                    "code": "unmarked_ephemeral_dataset",
+                    "dataset": dataset_name,
+                    "path": dataset_path,
+                    "message": (
+                        f"Ephemeral Dataset {dataset_name} at {dataset_path} is not marked "
+                        "as fortress-created; leaving it behind"
+                    ),
+                }
+            ]
+        return [], []
+    if actual_dataset:
+        return [], []
+    return [{"action": "create_dataset", "dataset": _ephemeral_dataset_payload(dataset)}], []
+
+
+def _ephemeral_dataset_payload(dataset):
+    return {
+        "name": dataset["name"],
+        "path": dataset["path"],
+        "lifecycle": "ephemeral",
+        "fortress_marker": _ephemeral_dataset_marker(dataset["name"]),
+    }
+
+
+def _ephemeral_dataset_marker(name):
+    return f"fortress:ephemeral-dataset:{name}"
+
+
+def _is_fortress_ephemeral_dataset(dataset, actual_dataset):
+    if not actual_dataset:
+        return False
+    return actual_dataset.get("fortress_marker") == _ephemeral_dataset_marker(dataset.get("name"))
 
 
 def _write_actions(desired_nfs_shares, existing_nfs_shares):
@@ -148,7 +229,11 @@ def _write_actions(desired_nfs_shares, existing_nfs_shares):
 
 def _apply_write_actions(client, write_actions):
     for action in write_actions:
-        if action["action"] == "create_nfs_share":
+        if action["action"] == "create_dataset":
+            client.create_dataset(action["dataset"])
+        elif action["action"] == "delete_dataset":
+            client.delete_dataset(action["dataset"], action["path"])
+        elif action["action"] == "create_nfs_share":
             client.create_nfs_share(action["share"])
         elif action["action"] == "update_nfs_share":
             client.update_nfs_share(action["share"], action["desired"])
@@ -237,11 +322,12 @@ def _mount_preflight_findings(inventory, previous_mounts):
     return findings
 
 
-def derive_desired_nfs_shares(inventory):
+def derive_desired_nfs_shares(inventory, include_ephemeral_datasets=False):
     datasets_by_name = {
         dataset.get("name"): dataset
         for dataset in inventory.datasets.values()
         if dataset.get("name")
+        and (include_ephemeral_datasets or dataset.get("lifecycle", "adopted") == "adopted")
     }
     grouped = {}
     for vm in inventory.vms.values():
@@ -310,6 +396,33 @@ def _share_findings(desired_nfs_shares, existing_nfs_shares):
                         "message": (
                             f"Unmanaged NFS Share {share.get('name')} overlaps desired Dataset "
                             f"{desired['dataset']}"
+                        ),
+                    }
+                )
+    return findings
+
+
+def _ephemeral_cleanup_share_findings(inventory, existing_nfs_shares):
+    ephemeral_datasets = [
+        dataset
+        for dataset in inventory.datasets.values()
+        if dataset.get("lifecycle") == "ephemeral" and dataset.get("path")
+    ]
+    findings = []
+    for share in sorted(existing_nfs_shares, key=lambda item: item.get("name", "")):
+        if _is_fortress_owned_share(share):
+            continue
+        for dataset in ephemeral_datasets:
+            if _paths_overlap(share.get("path"), dataset["path"]):
+                findings.append(
+                    {
+                        "code": "unmanaged_share_overlap",
+                        "share": share.get("name"),
+                        "dataset": dataset.get("name"),
+                        "path": share.get("path"),
+                        "message": (
+                            f"Unmanaged NFS Share {share.get('name')} overlaps Ephemeral Dataset "
+                            f"{dataset.get('name')}"
                         ),
                     }
                 )
