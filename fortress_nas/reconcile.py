@@ -30,6 +30,14 @@ class RecordingNasClient:
         self.operations.append({"method": "delete_nfs_share", "share": share})
 
 
+class NasApplyError(Exception):
+    def __init__(self, action, target, cause):
+        self.action = action
+        self.target = target
+        self.cause = cause
+        super().__init__(f"failed to apply {action} for {target}: {cause}")
+
+
 def load_reality(data):
     datasets = {
         dataset.get("path"): dataset
@@ -140,7 +148,7 @@ def build_nas_reconcile_plan(
         "confirmation_required": confirmation_required,
         "share_findings": share_findings,
     }
-    if client:
+    if client and hasattr(client, "operations"):
         result["api_operations"] = client.operations
     return result
 
@@ -229,16 +237,31 @@ def _write_actions(desired_nfs_shares, existing_nfs_shares):
 
 def _apply_write_actions(client, write_actions):
     for action in write_actions:
-        if action["action"] == "create_dataset":
-            client.create_dataset(action["dataset"])
-        elif action["action"] == "delete_dataset":
-            client.delete_dataset(action["dataset"], action["path"])
-        elif action["action"] == "create_nfs_share":
-            client.create_nfs_share(action["share"])
-        elif action["action"] == "update_nfs_share":
-            client.update_nfs_share(action["share"], action["desired"])
-        elif action["action"] == "delete_nfs_share":
-            client.delete_nfs_share(action["share"])
+        try:
+            if action["action"] == "create_dataset":
+                client.create_dataset(action["dataset"])
+            elif action["action"] == "delete_dataset":
+                client.delete_dataset(action["dataset"], action["path"])
+            elif action["action"] == "create_nfs_share":
+                client.create_nfs_share(action["share"])
+            elif action["action"] == "update_nfs_share":
+                client.update_nfs_share(action["share"], action["desired"])
+            elif action["action"] == "delete_nfs_share":
+                client.delete_nfs_share(action["share"])
+        except Exception as error:
+            raise NasApplyError(action["action"], _write_action_target(action), error) from error
+
+
+def _write_action_target(action):
+    if action["action"] == "create_nfs_share":
+        return f"NFS Share {action['share'].get('name')}"
+    if action["action"] in {"update_nfs_share", "delete_nfs_share"}:
+        return f"NFS Share {action.get('share')}"
+    if action["action"] == "create_dataset":
+        return f"Dataset {action['dataset'].get('name')}"
+    if action["action"] == "delete_dataset":
+        return f"Dataset {action.get('dataset')}"
+    return "unknown target"
 
 
 def _owned_share_payload(desired):
@@ -387,7 +410,7 @@ def _share_findings(desired_nfs_shares, existing_nfs_shares):
                 }
             )
     for share in sorted(existing_nfs_shares, key=lambda item: item.get("name", "")):
-        if share.get("fortress_owned") is True and share.get("name") not in desired_names:
+        if _is_fortress_owned_share(share) and share.get("name") not in desired_names:
             findings.append(
                 {
                     "code": "stale_fortress_owned_share",

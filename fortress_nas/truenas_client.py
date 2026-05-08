@@ -5,6 +5,7 @@ MANAGEMENT_API_REACHABILITY = "management API reachability"
 NAS_RECONCILE_CREDENTIAL_AUTHENTICATION = "NAS Reconcile Credential authentication"
 DATASET_READ = "Dataset read"
 NFS_SHARE_READ = "NFS Share read"
+NFS_SHARE_WRITE = "NFS Share write"
 
 
 class TrueNasCapabilityError(Exception):
@@ -69,6 +70,30 @@ class LiveTrueNasClient:
     def filesystem_stat(self, path):
         return self._call(DATASET_READ, "filesystem.stat", path)
 
+    def create_nfs_share(self, share):
+        return self._call(NFS_SHARE_WRITE, "sharing.nfs.create", _nfs_share_payload(share))
+
+    def update_nfs_share(self, share, desired):
+        existing = self._find_nfs_share(share)
+        return self._call(
+            NFS_SHARE_WRITE,
+            "sharing.nfs.update",
+            existing["id"],
+            _nfs_share_payload(desired),
+        )
+
+    def delete_nfs_share(self, share):
+        existing = self._find_nfs_share(share)
+        return self._call(NFS_SHARE_WRITE, "sharing.nfs.delete", existing["id"])
+
+    def _find_nfs_share(self, share_name):
+        shares = self._call(NFS_SHARE_READ, "sharing.nfs.query")
+        expected_marker = f"fortress:nfs-share:{share_name}"
+        for share in shares:
+            if share.get("comment") == expected_marker or share.get("comment") == share_name:
+                return share
+        raise TrueNasCapabilityError(NFS_SHARE_WRITE, f"NFS Share {share_name} was not found")
+
     def _call(self, capability, method, *args):
         try:
             return self._client.call(method, *args)
@@ -94,3 +119,13 @@ def _safe_reason(error, credential):
         if separator:
             text = text.replace(key, "[redacted]")
     return text
+
+
+def _nfs_share_payload(share):
+    return {
+        "paths": [share["path"]],
+        "comment": share["fortress_marker"],
+        "ro": share.get("access") == "read_only",
+        "hosts": share.get("clients", []),
+        "enabled": True,
+    }

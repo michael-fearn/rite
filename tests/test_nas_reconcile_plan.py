@@ -364,6 +364,243 @@ class NasReconcilePlanTests(unittest.TestCase):
                 "inventory/nas/truenas.sops.yaml:api_credentials.reconcile.value",
             )
 
+    def test_live_apply_creates_missing_fortress_owned_nfs_share_through_truenas_client(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "nas" / "truenas.sops.yaml").write_text("encrypted\n")
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {"path": "/mnt/pool/media", "owner": {"uid": 1000, "gid": 1000}},
+                        ],
+                        "nfs_shares": [],
+                    }
+                )
+            )
+            apply_log = root / "live-apply.jsonl"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_sops = bin_dir / "sops"
+            fake_sops.write_text("#!/usr/bin/env bash\nprintf 'super-secret-token\\n'\n")
+            fake_sops.chmod(fake_sops.stat().st_mode | stat.S_IXUSR)
+
+            result = self._run_live_reconcile(
+                root,
+                "truenas",
+                "--apply",
+                extra_env={
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "FORTRESS_FAKE_TRUENAS_REALITY_JSON": str(reality_path),
+                    "FORTRESS_FAKE_TRUENAS_APPLY_LOG": str(apply_log),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertNotIn("api_operations", output)
+            self.assertEqual(
+                [json.loads(line) for line in apply_log.read_text().splitlines()],
+                [
+                    {
+                        "method": "create_nfs_share",
+                        "share": {
+                            "name": "fortress-nfs-media-read-write",
+                            "path": "/mnt/pool/media",
+                            "protocol": "nfs",
+                            "access": "read_write",
+                            "clients": ["10.0.10.101"],
+                            "fortress_owned": True,
+                            "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
+                        },
+                    }
+                ],
+            )
+
+    def test_live_apply_updates_and_deletes_fortress_owned_nfs_shares_through_truenas_client(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "nas" / "truenas.sops.yaml").write_text("encrypted\n")
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {"path": "/mnt/pool/media", "owner": {"uid": 1000, "gid": 1000}},
+                        ],
+                        "nfs_shares": [
+                            {
+                                "name": "fortress-nfs-media-read-write",
+                                "path": "/mnt/pool/media",
+                                "access": "read_write",
+                                "clients": ["10.0.10.199"],
+                                "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
+                            },
+                            {
+                                "name": "fortress-nfs-archive-read-only",
+                                "path": "/mnt/pool/archive",
+                                "access": "read_only",
+                                "clients": ["10.0.10.101"],
+                                "fortress_marker": "fortress:nfs-share:fortress-nfs-archive-read-only",
+                            },
+                        ],
+                    }
+                )
+            )
+            apply_log = root / "live-apply.jsonl"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_sops = bin_dir / "sops"
+            fake_sops.write_text("#!/usr/bin/env bash\nprintf 'super-secret-token\\n'\n")
+            fake_sops.chmod(fake_sops.stat().st_mode | stat.S_IXUSR)
+
+            result = self._run_live_reconcile(
+                root,
+                "truenas",
+                "--apply",
+                extra_env={
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "FORTRESS_FAKE_TRUENAS_REALITY_JSON": str(reality_path),
+                    "FORTRESS_FAKE_TRUENAS_APPLY_LOG": str(apply_log),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [json.loads(line) for line in apply_log.read_text().splitlines()],
+                [
+                    {
+                        "method": "update_nfs_share",
+                        "share": "fortress-nfs-media-read-write",
+                        "desired": {
+                            "name": "fortress-nfs-media-read-write",
+                            "path": "/mnt/pool/media",
+                            "protocol": "nfs",
+                            "access": "read_write",
+                            "clients": ["10.0.10.101"],
+                            "fortress_owned": True,
+                            "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
+                        },
+                    },
+                    {
+                        "method": "delete_nfs_share",
+                        "share": "fortress-nfs-archive-read-only",
+                    },
+                ],
+            )
+
+    def test_live_apply_stops_on_first_truenas_write_failure_and_uses_forward_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "nas" / "truenas.sops.yaml").write_text("encrypted\n")
+            initial_reality_path = root / "initial-truenas-reality.json"
+            initial_reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {"path": "/mnt/pool/media", "owner": {"uid": 1000, "gid": 1000}},
+                        ],
+                        "nfs_shares": [
+                            {
+                                "name": "fortress-nfs-archive-read-only",
+                                "path": "/mnt/pool/archive",
+                                "access": "read_only",
+                                "clients": ["10.0.10.101"],
+                                "fortress_marker": "fortress:nfs-share:fortress-nfs-archive-read-only",
+                            },
+                        ],
+                    }
+                )
+            )
+            retry_reality_path = root / "retry-truenas-reality.json"
+            retry_reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {"path": "/mnt/pool/media", "owner": {"uid": 1000, "gid": 1000}},
+                        ],
+                        "nfs_shares": [
+                            {
+                                "name": "fortress-nfs-media-read-write",
+                                "path": "/mnt/pool/media",
+                                "access": "read_write",
+                                "clients": ["10.0.10.101"],
+                                "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
+                            },
+                            {
+                                "name": "fortress-nfs-archive-read-only",
+                                "path": "/mnt/pool/archive",
+                                "access": "read_only",
+                                "clients": ["10.0.10.101"],
+                                "fortress_marker": "fortress:nfs-share:fortress-nfs-archive-read-only",
+                            },
+                        ],
+                    }
+                )
+            )
+            apply_log = root / "live-apply.jsonl"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_sops = bin_dir / "sops"
+            fake_sops.write_text("#!/usr/bin/env bash\nprintf 'super-secret-token\\n'\n")
+            fake_sops.chmod(fake_sops.stat().st_mode | stat.S_IXUSR)
+            fake_env = {
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "FORTRESS_FAKE_TRUENAS_REALITY_JSON": str(initial_reality_path),
+                "FORTRESS_FAKE_TRUENAS_APPLY_LOG": str(apply_log),
+                "FORTRESS_FAKE_TRUENAS_FAIL_METHOD": "delete_nfs_share",
+            }
+
+            failed = self._run_live_reconcile(root, "truenas", "--apply", extra_env=fake_env)
+
+            self.assertEqual(failed.returncode, 1)
+            self.assertEqual(failed.stdout, "")
+            self.assertIn("delete_nfs_share", failed.stderr)
+            self.assertIn("fortress-nfs-archive-read-only", failed.stderr)
+            self.assertNotIn("rollback", failed.stderr.lower())
+            self.assertEqual(
+                [json.loads(line) for line in apply_log.read_text().splitlines()],
+                [
+                    {
+                        "method": "create_nfs_share",
+                        "share": {
+                            "name": "fortress-nfs-media-read-write",
+                            "path": "/mnt/pool/media",
+                            "protocol": "nfs",
+                            "access": "read_write",
+                            "clients": ["10.0.10.101"],
+                            "fortress_owned": True,
+                            "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
+                        },
+                    }
+                ],
+            )
+
+            retry = self._run_live_reconcile(
+                root,
+                "truenas",
+                extra_env={
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "FORTRESS_FAKE_TRUENAS_REALITY_JSON": str(retry_reality_path),
+                },
+            )
+
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            retry_plan = json.loads(retry.stdout)
+            self.assertIn(
+                {
+                    "code": "stale_fortress_owned_share",
+                    "share": "fortress-nfs-archive-read-only",
+                    "path": "/mnt/pool/archive",
+                    "message": "Fortress-owned NFS Share fortress-nfs-archive-read-only is no longer desired",
+                },
+                retry_plan["share_findings"],
+            )
+
     def test_live_plan_reports_preflight_capability_failure_without_printing_credential(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -508,6 +745,81 @@ class NasReconcilePlanTests(unittest.TestCase):
                     "clients": ["10.0.10.101"],
                     "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
                 }
+            ],
+        )
+
+    def test_live_truenas_adapter_writes_nfs_shares_with_fortress_marker_payload(self):
+        raw_client = FakeTrueNasRawClient(
+            responses={
+                "core.ping": "pong",
+                "sharing.nfs.query": [
+                    {
+                        "id": 7,
+                        "comment": "fortress:nfs-share:fortress-nfs-media-read-write",
+                    },
+                    {
+                        "id": 8,
+                        "comment": "fortress:nfs-share:fortress-nfs-archive-read-only",
+                    },
+                ],
+                "sharing.nfs.create": {"id": 9},
+                "sharing.nfs.update": {"id": 7},
+                "sharing.nfs.delete": True,
+            }
+        )
+        desired = {
+            "name": "fortress-nfs-media-read-write",
+            "path": "/mnt/pool/media",
+            "protocol": "nfs",
+            "access": "read_write",
+            "clients": ["10.0.10.101"],
+            "fortress_owned": True,
+            "fortress_marker": "fortress:nfs-share:fortress-nfs-media-read-write",
+        }
+
+        with LiveTrueNasClient.connect(
+            "10.0.10.10",
+            "operator:super-secret-token",
+            client_class=FakeRawClientClass(raw_client),
+        ) as client:
+            client.create_nfs_share(desired)
+            client.update_nfs_share("fortress-nfs-media-read-write", desired)
+            client.delete_nfs_share("fortress-nfs-archive-read-only")
+
+        self.assertEqual(
+            raw_client.operations[4:],
+            [
+                (
+                    "call",
+                    "sharing.nfs.create",
+                    (
+                        {
+                            "paths": ["/mnt/pool/media"],
+                            "comment": "fortress:nfs-share:fortress-nfs-media-read-write",
+                            "ro": False,
+                            "hosts": ["10.0.10.101"],
+                            "enabled": True,
+                        },
+                    ),
+                ),
+                ("call", "sharing.nfs.query", ()),
+                (
+                    "call",
+                    "sharing.nfs.update",
+                    (
+                        7,
+                        {
+                            "paths": ["/mnt/pool/media"],
+                            "comment": "fortress:nfs-share:fortress-nfs-media-read-write",
+                            "ro": False,
+                            "hosts": ["10.0.10.101"],
+                            "enabled": True,
+                        },
+                    ),
+                ),
+                ("call", "sharing.nfs.query", ()),
+                ("call", "sharing.nfs.delete", (8,)),
+                ("exit", None, ()),
             ],
         )
 

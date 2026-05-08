@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from contextlib import contextmanager
 import json
 import os
 import subprocess
@@ -11,7 +12,13 @@ FORTRESS_RUNTIME_PYTHON = Path("/opt/fortress-python/bin/python3")
 sys.path.insert(0, str(REPO_ROOT))
 
 from fortress_inventory.model import load_inventory_tree
-from fortress_nas.reconcile import RecordingNasClient, build_nas_reconcile_plan, load_reality
+from fortress_nas.reconcile import (
+    NasApplyError,
+    RecordingNasClient,
+    build_nas_reconcile_plan,
+    load_reality,
+)
+from fortress_nas.truenas_client import LiveTrueNasClient, TrueNasCapabilityError
 
 
 SOPS_EXTRACT_RECONCILE_CREDENTIAL = '["api_credentials"]["reconcile"]["value"]'
@@ -45,27 +52,36 @@ def main():
     args = parser.parse_args()
 
     repo_root = Path(os.environ.get("FORTRESS_ROOT", REPO_ROOT))
+    live_context = None
     try:
         inventory = load_inventory_tree(repo_root)
         if args.reality_json:
             with Path(args.reality_json).open() as handle:
                 reality = load_reality(json.load(handle))
         else:
-            reality = _load_live_reality(repo_root, inventory, args.live)
+            live_context = _load_live_reality(repo_root, inventory, args.live)
+            reality = live_context["reality"]
     except ReconcileCommandError as error:
         print(error, file=sys.stderr)
         return 1
 
-    client = RecordingNasClient() if args.apply else None
-    plan = build_nas_reconcile_plan(
-        inventory,
-        reality,
-        apply=args.apply,
-        client=client,
-        confirm_disruptive_mount_changes=args.confirm_disruptive_mount_changes,
-        acceptance_ephemeral_datasets=args.acceptance_ephemeral_datasets,
-        destroy_ephemeral_datasets=args.destroy_ephemeral_datasets,
-    )
+    try:
+        with _apply_client(args, live_context) as client:
+            plan = build_nas_reconcile_plan(
+                inventory,
+                reality,
+                apply=args.apply,
+                client=client,
+                confirm_disruptive_mount_changes=args.confirm_disruptive_mount_changes,
+                acceptance_ephemeral_datasets=args.acceptance_ephemeral_datasets,
+                destroy_ephemeral_datasets=args.destroy_ephemeral_datasets,
+            )
+    except NasApplyError as error:
+        print(error, file=sys.stderr)
+        return 1
+    except ReconcileCommandError as error:
+        print(error, file=sys.stderr)
+        return 1
     if args.live:
         plan["connection"][args.live]["credential_source"] = (
             f"inventory/nas/{args.live}.sops.yaml:api_credentials.reconcile.value"
@@ -128,11 +144,67 @@ def _load_live_reality(repo_root, inventory, endpoint_name):
             f"failed to load live TrueNAS reality for NAS Endpoint {endpoint_name}{suffix}"
         )
     try:
-        return load_reality(json.loads(result.stdout))
+        return {
+            "endpoint_name": endpoint_name,
+            "management_address": endpoint["management_address"],
+            "credential": credential,
+            "reality": load_reality(json.loads(result.stdout)),
+        }
     except json.JSONDecodeError as error:
         raise ReconcileCommandError(
             f"live TrueNAS reality loader returned invalid JSON for NAS Endpoint {endpoint_name}"
         ) from error
+
+
+@contextmanager
+def _apply_client(args, live_context):
+    if not args.apply:
+        yield None
+        return
+    if not args.live:
+        yield RecordingNasClient()
+        return
+    fake_apply_log = os.environ.get("FORTRESS_FAKE_TRUENAS_APPLY_LOG")
+    if fake_apply_log:
+        yield _FakeLiveTrueNasApplyClient(fake_apply_log)
+        return
+    try:
+        with LiveTrueNasClient.connect(
+            live_context["management_address"],
+            live_context["credential"],
+        ) as client:
+            yield client
+    except TrueNasCapabilityError as error:
+        raise ReconcileCommandError(
+            f"failed to apply live TrueNAS changes for NAS Endpoint "
+            f"{live_context['endpoint_name']}: {error}"
+        ) from error
+
+
+class _FakeLiveTrueNasApplyClient:
+    def __init__(self, log_path):
+        self._log_path = Path(log_path)
+
+    def create_nfs_share(self, share):
+        self._fail_if_requested("create_nfs_share", share["name"])
+        self._append({"method": "create_nfs_share", "share": share})
+
+    def update_nfs_share(self, share, desired):
+        self._fail_if_requested("update_nfs_share", share)
+        self._append({"method": "update_nfs_share", "share": share, "desired": desired})
+
+    def delete_nfs_share(self, share):
+        self._fail_if_requested("delete_nfs_share", share)
+        self._append({"method": "delete_nfs_share", "share": share})
+
+    def _fail_if_requested(self, method, target):
+        if os.environ.get("FORTRESS_FAKE_TRUENAS_FAIL_METHOD") == method:
+            raise RuntimeError(f"fake TrueNAS write failure for {method} {target}")
+
+    def _append(self, operation):
+        with self._log_path.open("a") as handle:
+            handle.write(json.dumps(operation, sort_keys=True))
+            handle.write("\n")
 
 
 def _sops_extract(sops_file, extract):
