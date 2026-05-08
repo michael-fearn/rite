@@ -8,14 +8,16 @@ from fortress_nas.truenas_client import LiveTrueNasClient, TrueNasCapabilityErro
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if len(argv) != 3:
+    if len(argv) not in (3, 4):
         print(
-            "usage: python3 -m fortress_nas.truenas_reality <endpoint> <management-address> <api-token-env>",
+            "usage: python3 -m fortress_nas.truenas_reality "
+            "<endpoint> <management-address> <api-token-env> [tls-verify]",
             file=sys.stderr,
         )
         return 2
 
-    endpoint_name, management_address, api_token_env = argv
+    endpoint_name, management_address, api_token_env = argv[:3]
+    tls_verify = len(argv) == 3 or argv[3] != "false"
     credential = os.environ.get(api_token_env)
     if not credential:
         print(f"{api_token_env} is not set for NAS Endpoint {endpoint_name}", file=sys.stderr)
@@ -32,7 +34,7 @@ def main(argv=None):
         return 0
 
     try:
-        reality = load_live_truenas_reality(management_address, credential)
+        reality = load_live_truenas_reality(management_address, credential, tls_verify=tls_verify)
     except TrueNasCapabilityError as error:
         print(
             f"TrueNAS preflight failed for NAS Endpoint {endpoint_name}: {error}",
@@ -48,8 +50,10 @@ def main(argv=None):
     return 0
 
 
-def load_live_truenas_reality(management_address, credential, client_factory=LiveTrueNasClient):
-    with client_factory.connect(management_address, credential) as client:
+def load_live_truenas_reality(
+    management_address, credential, client_factory=LiveTrueNasClient, tls_verify=True
+):
+    with client_factory.connect(management_address, credential, tls_verify=tls_verify) as client:
         client.preflight()
         datasets = [_dataset_payload(client, dataset) for dataset in client.datasets()]
         nfs_shares = [_nfs_share_payload(share) for share in client.nfs_shares()]

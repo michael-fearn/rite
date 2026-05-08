@@ -639,10 +639,10 @@ VMs can mount NAS Datasets from TrueNAS through derived Shares. Ordinary Dataset
 name: truenas
 management_address: 10.10.0.15
 share_address: 10.40.0.15
-api_token_env: TRUENAS_API_TOKEN
+tls_verify: false
 ```
 
-NAS Endpoint declarations name external NAS systems. The Management Address is used by NAS Reconcile, the Share Address is used by VM Mounts, and Dataset declarations hold durable data paths and ownership. Global NAS protocol defaults remain in `inventory/group_vars/all.yaml`.
+NAS Endpoint declarations name external NAS systems. The Management Address is used by NAS Reconcile, the Share Address is used by VM Mounts, and Dataset declarations hold durable data paths and ownership. Live NAS Reconcile uses encrypted WebSocket transport for TrueNAS API-key authentication; `tls_verify: false` is allowed for an IP-addressed endpoint with a self-signed certificate. The NAS Reconcile Credential lives in the endpoint's Sibling SOPS File rather than plaintext Inventory. Global NAS protocol defaults remain in `inventory/group_vars/all.yaml`.
 
 ### 13.2. Dataset declarations
 

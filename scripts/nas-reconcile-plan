@@ -3,6 +3,7 @@ import argparse
 from contextlib import contextmanager
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -83,6 +84,7 @@ def main():
         print(error, file=sys.stderr)
         return 1
     if args.live:
+        plan["connection"][args.live]["credentials"] = "operator_environment"
         plan["connection"][args.live]["credential_source"] = (
             f"inventory/nas/{args.live}.sops.yaml:api_credentials.reconcile.value"
         )
@@ -103,8 +105,6 @@ def _load_live_reality(repo_root, inventory, endpoint_name):
             f"NAS Endpoint Sibling SOPS File is required at {endpoint_sops}"
         )
     endpoint = inventory.nas_endpoints[endpoint_name]
-    if not endpoint.get("api_token_env"):
-        raise ReconcileCommandError(f"NAS Endpoint {endpoint_name} must declare api_token_env")
     try:
         credential = _sops_extract(endpoint_sops, SOPS_EXTRACT_RECONCILE_CREDENTIAL)
     except subprocess.CalledProcessError as error:
@@ -119,7 +119,8 @@ def _load_live_reality(repo_root, inventory, endpoint_name):
         )
 
     child_env = os.environ.copy()
-    child_env[endpoint["api_token_env"]] = credential
+    api_token_env = _reconcile_credential_env_name(endpoint_name)
+    child_env[api_token_env] = credential
     pythonpath = child_env.get("PYTHONPATH")
     child_env["PYTHONPATH"] = str(REPO_ROOT) if not pythonpath else f"{REPO_ROOT}{os.pathsep}{pythonpath}"
     result = subprocess.run(
@@ -129,7 +130,8 @@ def _load_live_reality(repo_root, inventory, endpoint_name):
             "fortress_nas.truenas_reality",
             endpoint_name,
             endpoint["management_address"],
-            endpoint["api_token_env"],
+            api_token_env,
+            "true" if endpoint.get("tls_verify", True) else "false",
         ],
         cwd=repo_root,
         env=child_env,
@@ -224,6 +226,11 @@ def _live_reality_python():
     if FORTRESS_RUNTIME_PYTHON.is_file():
         return str(FORTRESS_RUNTIME_PYTHON)
     return sys.executable
+
+
+def _reconcile_credential_env_name(endpoint_name):
+    normalized = re.sub(r"[^A-Z0-9]+", "_", endpoint_name.upper()).strip("_")
+    return f"FORTRESS_NAS_RECONCILE_{normalized}_TOKEN"
 
 
 def _safe_child_error(stderr, credential):

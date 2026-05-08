@@ -9,28 +9,68 @@ Declare both TrueNAS addresses on the NAS Endpoint. In the current topology, Tru
 name: truenas
 management_address: 10.10.0.15
 share_address: 10.40.0.15
-api_token_env: TRUENAS_API_TOKEN
+tls_verify: false
 ```
 
-`management_address` is for TrueNAS API-backed NAS Reconcile. `share_address` is what VMs use when mounting NFS Shares. `api_token_env` names the environment variable the operator workflow exports from `inventory/nas/truenas.sops.yaml` before connecting to TrueNAS. The API token value must not be stored in plaintext Inventory.
+`management_address` is for TrueNAS API-backed NAS Reconcile. `share_address` is what VMs use when mounting NFS Shares. Live NAS Reconcile connects with encrypted WebSocket transport. Use `tls_verify: false` only when the endpoint presents a self-signed certificate that fortress cannot verify by CA chain, such as the IP-addressed lab endpoint. The NAS Reconcile Credential lives in `inventory/nas/truenas.sops.yaml`; no API token value or token environment variable belongs in plaintext Inventory.
 
 ```yaml
 # inventory/nas/truenas.sops.yaml
 api_credentials:
   reconcile:
     type: truenas_api_key
-    value: ENC[...]
+    value: ENC[...] # generated API key string
+  acceptance:
+    type: truenas_api_key
+    value: ENC[...] # generated API key string
 ```
 
-The workflow decrypts `api_credentials.reconcile.value` directly into the child process environment named by `api_token_env`; it does not write a temporary token file.
+The workflow decrypts `api_credentials.reconcile.value` directly into a private child-process environment variable derived from the endpoint name, such as `FORTRESS_NAS_RECONCILE_TRUENAS_TOKEN`; it does not write a temporary token file. Store each TrueNAS API credential value as the generated API key string shown once by TrueNAS when the key is created or reset.
+
+## NAS Credential Ceremony
+
+ADR [0019](../docs/adr/0019-truenas-api-authentication-uses-operator-environment.md) defines the authentication model for live NAS Reconcile. Perform this NAS Credential Ceremony manually in TrueNAS for each NAS Endpoint, then store the generated credential values in the NAS Endpoint Sibling SOPS File at `inventory/nas/<endpoint>.sops.yaml`.
+
+Create the ordinary NAS Reconcile Credential first:
+
+1. In TrueNAS, create an API key named `fortress-nas-reconcile`.
+2. Grant it Dataset-read intent so NAS Reconcile can inspect Dataset metadata and ownership.
+3. Grant it NFS-Share-manage intent so NAS Reconcile can create, update, and destroy fortress-owned Shares.
+4. Store the generated API key string at `api_credentials.reconcile.value` in `inventory/nas/<endpoint>.sops.yaml`.
+
+The ordinary NAS Reconcile Credential must not create, update, or delete ordinary Datasets. Routine NAS Reconcile validates ordinary Datasets and manages derived Shares only.
+
+Create the Acceptance NAS Credential in the same operator session:
+
+1. In TrueNAS, create an API key named `fortress-acceptance-ephemeral`.
+2. Grant it only the privileges needed by Acceptance Tests that create or destroy Ephemeral Datasets.
+3. Store the generated API key string at `api_credentials.acceptance.value` in `inventory/nas/<endpoint>.sops.yaml`.
+
+Do not use the Acceptance NAS Credential for routine NAS Reconcile. It exists so Acceptance Tests can prove Ephemeral Dataset mutation without widening the ordinary NAS Reconcile Credential.
 
 Live NAS Reconcile uses the official `truenas_api_client` package to target the current TrueNAS SCALE API client/WebSocket API surface. Fortress does not implement the WebSocket/JSON-RPC protocol itself. The deprecated REST API is out of scope.
 
-Before live planning or apply, NAS Reconcile performs a non-mutating credential preflight: the configured environment variable must exist, the management API must be reachable, and Dataset/NFS Share read capabilities must be available. Write capability is checked only if TrueNAS exposes a safe non-mutating permission check; NAS Reconcile does not create a throwaway Share to test credentials.
+Before live planning or apply, NAS Reconcile performs a non-mutating credential preflight: the workflow must decrypt and export the SOPS-backed credential into its child process, the management API must be reachable over encrypted WebSocket transport, and Dataset/NFS Share read capabilities must be available. TrueNAS 25.10 requires TLS for API-key authentication and can revoke API keys presented over insecure transport; if live auth starts returning `Invalid API key`, reset the user-linked API key in TrueNAS and update `api_credentials.reconcile.value`. Write capability is checked only if TrueNAS exposes a safe non-mutating permission check; NAS Reconcile does not create a throwaway Share to test credentials.
 
 Live commands name the NAS Endpoint explicitly, for example `scripts/nas-reconcile-plan --live truenas`. Fixture-backed commands with `--reality-json` remain endpoint-implicit, credential-free, and available for offline planning and tests.
 
 Both live plan and live apply require `inventory/nas/<endpoint>.sops.yaml`; missing endpoint SOPS material fails before any network access.
+
+## Live operator demo checklist
+
+Use this checklist to prove endpoint-explicit live NAS Reconcile can read TrueNAS and produce a read-only plan without mutating TrueNAS:
+
+1. Confirm `inventory/nas/truenas.yaml` declares the NAS Endpoint, its Management Address, and its Share Address.
+2. Confirm `inventory/nas/truenas.sops.yaml` contains the NAS Reconcile Credential at `api_credentials.reconcile.value`.
+3. Run `scripts/nas-reconcile-plan --live truenas` without `--apply`.
+4. Confirm the command performs live preflight against the Management Address, loads TrueNAS reality, and prints a read-only plan.
+5. Confirm the output reports the Credential Source as `inventory/nas/truenas.sops.yaml:api_credentials.reconcile.value` and never prints the credential value.
+6. Confirm no ordinary Datasets are created, updated, or deleted, and no TrueNAS mutation occurs during the demo.
+
+Expected failure modes:
+
+- missing SOPS material: if `inventory/nas/truenas.sops.yaml` is absent or does not contain `api_credentials.reconcile.value`, the command fails before network access.
+- insufficient privilege: if the `fortress-nas-reconcile` API key lacks Dataset-read or NFS Share read capability, live preflight fails before reconciliation logic runs. If later apply privileges are missing, retry after fixing the TrueNAS-side key rather than broadening the credential to mutate ordinary Datasets.
 
 ## UID/GID convention
 

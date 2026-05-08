@@ -2,11 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "management_address", "share_address", "api_token_env"],
+  "required": ["name", "management_address", "share_address"],
   "properties": {
     "name": { "type": "string", "minLength": 1 },
     "management_address": { "type": "string", "minLength": 1 },
     "share_address": { "type": "string", "minLength": 1 },
-    "api_token_env": { "type": "string", "minLength": 1 }
+    "tls_verify": { "type": "boolean" }
   }
 }

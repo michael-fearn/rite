@@ -210,7 +210,7 @@ An operator-provided NAS API credential used only by Acceptance Tests that must 
 _Avoid_: test NAS admin token, ordinary NAS Reconcile Credential.
 
 **Acceptance NAS API Key Name**:
-The TrueNAS-side name `fortress-acceptance-ephemeral-datasets` for the Acceptance NAS Credential.
+The TrueNAS-side name `fortress-acceptance-ephemeral` for the Acceptance NAS Credential.
 _Avoid_: test key, broad acceptance key.
 
 **Credential Source**:

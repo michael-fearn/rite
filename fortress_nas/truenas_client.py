@@ -22,15 +22,15 @@ class LiveTrueNasClient:
 
     @classmethod
     @contextmanager
-    def connect(cls, management_address, credential, client_class=None):
+    def connect(cls, management_address, credential, client_class=None, tls_verify=True):
         if client_class is None:
             from truenas_api_client import Client
 
             client_class = Client
 
-        uri = f"ws://{management_address}/api/current"
+        uri = f"wss://{management_address}/api/current"
         try:
-            with client_class(uri=uri) as client:
+            with client_class(uri=uri, verify_ssl=tls_verify) as client:
                 try:
                     _login_with_api_key(client, credential)
                 except Exception as error:
@@ -102,11 +102,17 @@ class LiveTrueNasClient:
 
 
 def _login_with_api_key(client, credential):
-    username, separator, key = credential.partition(":")
-    if separator:
-        client.login_with_api_key(username, key)
-    else:
-        client.login_with_api_key("root", credential)
+    login_with_api_key = getattr(client, "login_with_api_key", None)
+    if callable(login_with_api_key):
+        username, separator, key = credential.partition(":")
+        if separator:
+            login_with_api_key(username, key)
+        else:
+            login_with_api_key("root", credential)
+        return
+    _api_key_name, separator, api_key = credential.partition(":")
+    if not client.call("auth.login_with_api_key", api_key if separator else credential):
+        raise ValueError("Invalid API key")
 
 
 def _safe_reason(error, credential):

@@ -248,8 +248,6 @@ class NasReconcilePlanTests(unittest.TestCase):
                 {
                     "management_address": "10.0.10.10",
                     "share_address": "10.0.20.10",
-                    "api_token_env": "TRUENAS_API_TOKEN",
-                    "credentials": "operator_environment",
                 },
             )
 
@@ -279,24 +277,55 @@ class NasReconcilePlanTests(unittest.TestCase):
             self.assertIn("NAS Endpoint Sibling SOPS File is required", result.stderr)
             self.assertIn("inventory/nas/truenas.sops.yaml", result.stderr)
 
-    def test_live_plan_requires_api_token_env_before_decrypting_credential(self):
+    def test_live_plan_uses_internal_reconcile_token_env_when_endpoint_has_no_api_token_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
             endpoint_path = root / "inventory" / "nas" / "truenas.yaml"
-            endpoint_path.write_text(
-                endpoint_path.read_text().replace("api_token_env: TRUENAS_API_TOKEN\n", "")
-            )
+            self.assertNotIn("api_token_env", endpoint_path.read_text())
             (root / "inventory" / "nas" / "truenas.sops.yaml").write_text(
                 "api_credentials:\n  reconcile:\n    value: super-secret-token\n"
             )
+            reality_path = root / "truenas-reality.json"
+            reality_path.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {"path": "/mnt/pool/media", "owner": {"uid": 1000, "gid": 1000}},
+                        ],
+                        "nfs_shares": [],
+                    }
+                )
+            )
+            env_log = root / "live-env.log"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_sops = bin_dir / "sops"
+            fake_sops.write_text("#!/usr/bin/env bash\nprintf 'super-secret-token\\n'\n")
+            fake_sops.chmod(fake_sops.stat().st_mode | stat.S_IXUSR)
 
-            result = self._run_live_reconcile(root, "truenas")
+            result = self._run_live_reconcile(
+                root,
+                "truenas",
+                extra_env={
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "FORTRESS_FAKE_TRUENAS_REALITY_JSON": str(reality_path),
+                    "FORTRESS_FAKE_TRUENAS_ENV_LOG": str(env_log),
+                },
+            )
 
-            self.assertEqual(result.returncode, 1)
-            self.assertEqual(result.stdout, "")
-            self.assertIn("NAS Endpoint truenas must declare api_token_env", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(env_log.read_text(), "FORTRESS_NAS_RECONCILE_TRUENAS_TOKEN=super-secret-token\n")
+            self.assertNotIn("FORTRESS_NAS_RECONCILE_TRUENAS_TOKEN", result.stdout)
+            self.assertNotIn("super-secret-token", result.stdout)
             self.assertNotIn("super-secret-token", result.stderr)
+            plan = json.loads(result.stdout)
+            self.assertNotIn("api_token_env", plan["connection"]["truenas"])
+            self.assertEqual(
+                plan["connection"]["truenas"]["credential_source"],
+                "inventory/nas/truenas.sops.yaml:api_credentials.reconcile.value",
+            )
+            self.assertEqual(plan["connection"]["truenas"]["credentials"], "operator_environment")
 
     def test_live_plan_reports_failed_sops_extraction_without_printing_credential(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,13 +385,14 @@ class NasReconcilePlanTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("super-secret-token", result.stdout)
             self.assertNotIn("super-secret-token", result.stderr)
-            self.assertEqual(env_log.read_text(), "TRUENAS_API_TOKEN=super-secret-token\n")
+            self.assertEqual(env_log.read_text(), "FORTRESS_NAS_RECONCILE_TRUENAS_TOKEN=super-secret-token\n")
             plan = json.loads(result.stdout)
             self.assertTrue(plan["read_only"])
             self.assertEqual(
                 plan["connection"]["truenas"]["credential_source"],
                 "inventory/nas/truenas.sops.yaml:api_credentials.reconcile.value",
             )
+            self.assertEqual(plan["connection"]["truenas"]["credentials"], "operator_environment")
 
     def test_live_apply_creates_missing_fortress_owned_nfs_share_through_truenas_client(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -686,6 +716,74 @@ class NasReconcilePlanTests(unittest.TestCase):
                 "previous_mounts": [],
             },
         )
+
+    def test_live_truenas_adapter_authenticates_jsonrpc_client_with_api_key_call(self):
+        raw_client = FakeTrueNasJsonRpcClient(
+            responses={
+                "auth.login_with_api_key": True,
+                "core.ping": "pong",
+                "pool.dataset.query": [],
+                "sharing.nfs.query": [],
+            }
+        )
+
+        reality = load_live_truenas_reality(
+            "10.0.10.10",
+            "operator:super-secret-token",
+            client_factory=FakeTrueNasClientFactory(raw_client),
+        )
+
+        self.assertEqual(
+            raw_client.operations[0:6],
+            [
+                ("connect", "wss://10.0.10.10/api/current", {"verify_ssl": True}),
+                ("enter", None, ()),
+                ("call", "auth.login_with_api_key", ("super-secret-token",)),
+                ("call", "core.ping", ()),
+                ("call", "pool.dataset.query", ([], {"limit": 1})),
+                ("call", "sharing.nfs.query", ([], {"limit": 1})),
+            ],
+        )
+        self.assertEqual(reality, {"datasets": [], "nfs_shares": [], "previous_mounts": []})
+
+    def test_live_truenas_adapter_can_disable_tls_certificate_verification(self):
+        raw_client = FakeTrueNasJsonRpcClient(
+            responses={
+                "auth.login_with_api_key": True,
+                "core.ping": "pong",
+                "pool.dataset.query": [],
+                "sharing.nfs.query": [],
+            }
+        )
+
+        load_live_truenas_reality(
+            "10.0.10.10",
+            "super-secret-token",
+            client_factory=FakeTrueNasClientFactory(raw_client),
+            tls_verify=False,
+        )
+
+        self.assertEqual(
+            raw_client.operations[0],
+            ("connect", "wss://10.0.10.10/api/current", {"verify_ssl": False}),
+        )
+
+    def test_live_truenas_adapter_names_jsonrpc_invalid_credential_without_printing_it(self):
+        raw_client = FakeTrueNasJsonRpcClient(
+            responses={"auth.login_with_api_key": False},
+        )
+
+        with self.assertRaises(TrueNasCapabilityError) as raised:
+            with LiveTrueNasClient.connect(
+                "10.0.10.10",
+                "operator:super-secret-token",
+                client_class=FakeRawClientClass(raw_client),
+            ):
+                pass
+
+        self.assertEqual(raised.exception.capability, NAS_RECONCILE_CREDENTIAL_AUTHENTICATION)
+        self.assertIn("Invalid API key", str(raised.exception))
+        self.assertNotIn("super-secret-token", str(raised.exception))
 
     def test_live_truenas_adapter_names_failed_preflight_capability_without_credential(self):
         raw_client = FakeTrueNasRawClient(
@@ -1695,11 +1793,12 @@ class FakeTrueNasClientFactory:
     def __init__(self, raw_client):
         self._raw_client = raw_client
 
-    def connect(self, management_address, credential):
+    def connect(self, management_address, credential, **kwargs):
         return LiveTrueNasClient.connect(
             management_address,
             credential,
             client_class=FakeRawClientClass(self._raw_client),
+            tls_verify=kwargs.get("tls_verify", True),
         )
 
 
@@ -1707,8 +1806,8 @@ class FakeRawClientClass:
     def __init__(self, raw_client):
         self._raw_client = raw_client
 
-    def __call__(self, uri):
-        self._raw_client.operations.append(("connect", uri, ()))
+    def __call__(self, uri, **kwargs):
+        self._raw_client.operations.append(("connect", uri, kwargs))
         return self._raw_client
 
 
@@ -1739,3 +1838,7 @@ class FakeTrueNasRawClient:
         if failure:
             raise failure
         return self.responses.get(method, [])
+
+
+class FakeTrueNasJsonRpcClient(FakeTrueNasRawClient):
+    login_with_api_key = None
