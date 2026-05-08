@@ -17,12 +17,12 @@ network:
       gateway: 10.10.0.1
 cloud_init:
   hostname: wintermute-demo
-mounts:
-  - name: test
-    dataset: test
-    protocol: nfs
-    mount_point: /mnt/test
-    access: read_write
+# mounts:
+#   - name: test
+#     dataset: test
+#     protocol: nfs
+#     mount_point: /mnt/test
+#     access: read_write
 backup:
   enabled: false
 ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPfHm825oY94w1pOelAjntptVXeHuvpEqOjlxYfg3P1L fortress-vm-prepare:wintermute-demo:2026-05-06T04:25:15Z

@@ -63,6 +63,9 @@ def load_live_truenas_reality(
 def _dataset_payload(client, dataset):
     mountpoint = _property_value(dataset.get("mountpoint"))
     payload = {"path": mountpoint or f"/mnt/{dataset.get('id')}"}
+    comments = _property_value(dataset.get("comments"))
+    if isinstance(comments, str) and comments.startswith("fortress:ephemeral-dataset:"):
+        payload["fortress_marker"] = comments
     if payload["path"]:
         try:
             stat = client.filesystem_stat(payload["path"])

@@ -921,6 +921,83 @@ class NasReconcilePlanTests(unittest.TestCase):
             ],
         )
 
+    def test_live_truenas_adapter_applies_ephemeral_dataset_writes(self):
+        raw_client = FakeTrueNasRawClient(responses={"core.ping": "pong"})
+        dataset = {
+            "name": "acceptance-media",
+            "path": "/mnt/pool/fortress-acceptance/media",
+            "lifecycle": "ephemeral",
+            "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+        }
+
+        with LiveTrueNasClient.connect(
+            "10.0.10.10",
+            "operator:super-secret-token",
+            client_class=FakeRawClientClass(raw_client),
+        ) as client:
+            client.create_dataset(dataset)
+            client.delete_dataset("acceptance-media", "/mnt/pool/fortress-acceptance/media")
+
+        self.assertEqual(
+            raw_client.operations[4:],
+            [
+                (
+                    "call",
+                    "pool.dataset.create",
+                    (
+                        {
+                            "name": "pool/fortress-acceptance/media",
+                            "type": "FILESYSTEM",
+                            "comments": "fortress:ephemeral-dataset:acceptance-media",
+                            "create_ancestors": True,
+                        },
+                    ),
+                ),
+                (
+                    "call",
+                    "pool.dataset.delete",
+                    (
+                        "pool/fortress-acceptance/media",
+                        {"recursive": False, "force": False},
+                    ),
+                ),
+                ("exit", None, ()),
+            ],
+        )
+
+    def test_live_reality_reads_fortress_ephemeral_dataset_marker(self):
+        raw_client = FakeTrueNasRawClient(
+            responses={
+                "core.ping": "pong",
+                "pool.dataset.query": [
+                    {
+                        "id": "pool/fortress-acceptance/media",
+                        "mountpoint": {"value": "/mnt/pool/fortress-acceptance/media"},
+                        "comments": {
+                            "value": "fortress:ephemeral-dataset:acceptance-media",
+                        },
+                    },
+                ],
+                "sharing.nfs.query": [],
+                "filesystem.stat": {"uid": 0, "gid": 0},
+            }
+        )
+
+        live_reality = load_live_truenas_reality(
+            "10.0.10.10",
+            "operator:super-secret-token",
+            client_factory=FakeTrueNasClientFactory(raw_client),
+        )
+
+        self.assertIn(
+            {
+                "path": "/mnt/pool/fortress-acceptance/media",
+                "owner": {"uid": 0, "gid": 0},
+                "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+            },
+            live_reality["datasets"],
+        )
+
     def test_live_reality_reports_drifted_fortress_owned_nfs_share_in_read_only_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

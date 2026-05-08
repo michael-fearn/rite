@@ -6,6 +6,7 @@ NAS_RECONCILE_CREDENTIAL_AUTHENTICATION = "NAS Reconcile Credential authenticati
 DATASET_READ = "Dataset read"
 NFS_SHARE_READ = "NFS Share read"
 NFS_SHARE_WRITE = "NFS Share write"
+DATASET_WRITE = "Dataset write"
 
 
 class TrueNasCapabilityError(Exception):
@@ -69,6 +70,17 @@ class LiveTrueNasClient:
 
     def filesystem_stat(self, path):
         return self._call(DATASET_READ, "filesystem.stat", path)
+
+    def create_dataset(self, dataset):
+        return self._call(DATASET_WRITE, "pool.dataset.create", _dataset_create_payload(dataset))
+
+    def delete_dataset(self, _dataset_name, path):
+        return self._call(
+            DATASET_WRITE,
+            "pool.dataset.delete",
+            _dataset_id_from_mount_path(path),
+            {"recursive": False, "force": False},
+        )
 
     def create_nfs_share(self, share):
         return self._call(NFS_SHARE_WRITE, "sharing.nfs.create", _nfs_share_payload(share))
@@ -135,3 +147,19 @@ def _nfs_share_payload(share):
         "hosts": share.get("clients", []),
         "enabled": True,
     }
+
+
+def _dataset_create_payload(dataset):
+    return {
+        "name": _dataset_id_from_mount_path(dataset["path"]),
+        "type": "FILESYSTEM",
+        "comments": dataset["fortress_marker"],
+        "create_ancestors": True,
+    }
+
+
+def _dataset_id_from_mount_path(path):
+    prefix = "/mnt/"
+    if not path.startswith(prefix):
+        raise ValueError(f"TrueNAS Dataset path must start with {prefix}: {path}")
+    return path.removeprefix(prefix).strip("/")
