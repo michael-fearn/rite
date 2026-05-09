@@ -156,13 +156,17 @@ def _safe_reason(error, credential):
 
 
 def _nfs_share_payload(share):
-    return {
+    payload = {
         "path": share["path"],
         "comment": share["fortress_marker"],
         "ro": share.get("access") == "read_only",
         "hosts": share.get("clients", []),
         "enabled": True,
     }
+    for key in ("maproot_user", "maproot_group", "mapall_user", "mapall_group"):
+        if share.get(key):
+            payload[key] = share[key]
+    return payload
 
 
 def _dataset_create_payload(dataset):

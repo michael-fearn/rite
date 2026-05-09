@@ -3,9 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 import os
+import importlib.util
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SYSTEMD_UNITS = importlib.util.spec_from_file_location(
+    "systemd_units",
+    REPO_ROOT / "ansible" / "roles" / "vm_nfs_mounts" / "filter_plugins" / "systemd_units.py",
+)
+systemd_units = importlib.util.module_from_spec(SYSTEMD_UNITS)
+SYSTEMD_UNITS.loader.exec_module(systemd_units)
 
 
 class VMNFSMountsRoleTests(unittest.TestCase):
@@ -40,7 +47,7 @@ class VMNFSMountsRoleTests(unittest.TestCase):
                 "        - name: media\n"
                 "          dataset: media\n"
                 "          protocol: nfs\n"
-                f"          mount_point: {mount_root / 'media'}\n"
+                f"          mount_point: {mount_root / 'media-files'}\n"
                 "          access: read_only\n"
                 "          options_extra: [x-systemd.automount]\n"
                 "  roles:\n"
@@ -62,10 +69,10 @@ class VMNFSMountsRoleTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((mount_root / "media").is_dir())
-            unit = (unit_dir / f"{str(mount_root / 'media').strip('/').replace('/', '-')}.mount").read_text()
+            self.assertTrue((mount_root / "media-files").is_dir())
+            unit = (unit_dir / systemd_units.fortress_systemd_mount_unit(mount_root / "media-files")).read_text()
             self.assertIn("What=10.0.20.10:/mnt/pool/media", unit)
-            self.assertIn(f"Where={mount_root / 'media'}", unit)
+            self.assertIn(f"Where={mount_root / 'media-files'}", unit)
             self.assertIn("Type=nfs", unit)
             self.assertIn("Options=nfsvers=4.2,soft,_netdev,ro,x-systemd.automount", unit)
             self.assertIn("WantedBy=multi-user.target", unit)
@@ -125,5 +132,5 @@ class VMNFSMountsRoleTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            unit = (unit_dir / f"{str(mount_root / 'media').strip('/').replace('/', '-')}.mount").read_text()
+            unit = (unit_dir / systemd_units.fortress_systemd_mount_unit(mount_root / "media")).read_text()
             self.assertIn("Options=nfsvers=4.2,soft,_netdev,rw", unit)

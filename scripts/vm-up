@@ -4,6 +4,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from fortress_inventory.model import load_inventory_tree
+from fortress_tofu.generate import hcl_identifier
+
 
 def main():
     parsed = parse_args(sys.argv[1:])
@@ -18,9 +23,13 @@ def main():
         print(f"VM {vm!r} is not declared at {vm_yaml}", file=sys.stderr)
         return 1
 
+    target_args = selected_vm_target_args(repo_root, vm)
+    if target_args is None:
+        return 1
+
     phases = [
         ("Prepare", [str(repo_root / "scripts" / "vm-prepare"), vm]),
-        ("tofu plan", [str(repo_root / "scripts" / "tofu-wrap"), "plan", "-var", f"selected_vm={vm}"]),
+        ("tofu plan", [str(repo_root / "scripts" / "tofu-wrap"), "plan", "-var", f"selected_vm={vm}", *target_args]),
     ]
     for phase, command in phases:
         returncode = run_phase(phase, command, vm)
@@ -36,7 +45,7 @@ def main():
     phases = [
         (
             "tofu apply",
-            [str(repo_root / "scripts" / "tofu-wrap"), "apply", "-var", f"selected_vm={vm}", "-auto-approve"],
+            [str(repo_root / "scripts" / "tofu-wrap"), "apply", "-var", f"selected_vm={vm}", *target_args, "-auto-approve"],
         ),
         ("Configure", [str(repo_root / "scripts" / "vm-configure"), vm]),
     ]
@@ -60,6 +69,21 @@ def parse_args(args):
         auto_confirm = True
 
     return vm, auto_confirm
+
+
+def selected_vm_target_args(repo_root, vm):
+    model = load_inventory_tree(repo_root)
+    host = model.vms.get(vm, {}).get("placement", {}).get("host")
+    if not host:
+        print(f"VM {vm!r} has no placement.host", file=sys.stderr)
+        return None
+    host_alias = hcl_identifier(host)
+    return [
+        "-target",
+        f'module.vms_{host_alias}.proxmox_virtual_environment_file.cloud_init_user_data["{vm}"]',
+        "-target",
+        f'module.vms_{host_alias}.proxmox_virtual_environment_vm.vm["{vm}"]',
+    ]
 
 
 def run_phase(phase, command, vm):

@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -56,30 +57,18 @@ class AcceptanceNFSSharedMountWorkflowTests(unittest.TestCase):
                     "vm-up tmp-nfs-primary --auto-confirm",
                     "vm-up tmp-nfs-peer --auto-confirm",
                     f"ansible-inventory -i {root / 'inventory' / 'fortress.yaml'} --list",
-                    "decrypt-keys inventory/vms/tmp-nfs-primary.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 systemctl is-active mnt-nfs-demo.mount",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 systemctl is-active mnt-nfs-demo.mount",
-                    "decrypt-keys inventory/vms/tmp-nfs-primary.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 findmnt /mnt/nfs-demo",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 findmnt /mnt/nfs-demo",
-                    "decrypt-keys inventory/vms/tmp-nfs-peer.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 systemctl is-active mnt-nfs-demo.mount",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 systemctl is-active mnt-nfs-demo.mount",
-                    "decrypt-keys inventory/vms/tmp-nfs-peer.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 findmnt /mnt/nfs-demo",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 findmnt /mnt/nfs-demo",
-                    "decrypt-keys inventory/vms/tmp-nfs-primary.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 sh -lc printf primary > /mnt/nfs-demo/fortress-primary.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 sh -lc printf primary > /mnt/nfs-demo/fortress-primary.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-peer.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 cat /mnt/nfs-demo/fortress-primary.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 cat /mnt/nfs-demo/fortress-primary.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-peer.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 sh -lc printf peer > /mnt/nfs-demo/fortress-peer.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 sh -lc printf peer > /mnt/nfs-demo/fortress-peer.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-primary.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 cat /mnt/nfs-demo/fortress-peer.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 cat /mnt/nfs-demo/fortress-peer.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-peer.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 rm /mnt/nfs-demo/fortress-primary.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 rm /mnt/nfs-demo/fortress-primary.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-primary.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 test ! -e /mnt/nfs-demo/fortress-primary.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 test ! -e /mnt/nfs-demo/fortress-primary.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-primary.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 rm /mnt/nfs-demo/fortress-peer.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-primary.key root@10.10.0.231 rm /mnt/nfs-demo/fortress-peer.txt",
-                    "decrypt-keys inventory/vms/tmp-nfs-peer.sops.yaml -- ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 test ! -e /mnt/nfs-demo/fortress-peer.txt",
-                    "ssh -i /dev/shm/fortress/tmp-nfs-peer.key root@10.10.0.232 test ! -e /mnt/nfs-demo/fortress-peer.txt",
+                    *self._ssh_calls("tmp-nfs-primary", "10.10.0.231", "systemctl", "is-active", "mnt-nfs\\x2ddemo.mount"),
+                    *self._ssh_calls("tmp-nfs-primary", "10.10.0.231", "findmnt", "/mnt/nfs-demo"),
+                    *self._ssh_calls("tmp-nfs-peer", "10.10.0.232", "systemctl", "is-active", "mnt-nfs\\x2ddemo.mount"),
+                    *self._ssh_calls("tmp-nfs-peer", "10.10.0.232", "findmnt", "/mnt/nfs-demo"),
+                    *self._ssh_calls("tmp-nfs-primary", "10.10.0.231", "sh", "-lc", "printf primary > /mnt/nfs-demo/fortress-primary.txt"),
+                    *self._ssh_calls("tmp-nfs-peer", "10.10.0.232", "cat", "/mnt/nfs-demo/fortress-primary.txt"),
+                    *self._ssh_calls("tmp-nfs-peer", "10.10.0.232", "sh", "-lc", "printf peer > /mnt/nfs-demo/fortress-peer.txt"),
+                    *self._ssh_calls("tmp-nfs-primary", "10.10.0.231", "cat", "/mnt/nfs-demo/fortress-peer.txt"),
+                    *self._ssh_calls("tmp-nfs-peer", "10.10.0.232", "rm", "/mnt/nfs-demo/fortress-primary.txt"),
+                    *self._ssh_calls("tmp-nfs-primary", "10.10.0.231", "test", "!", "-e", "/mnt/nfs-demo/fortress-primary.txt"),
+                    *self._ssh_calls("tmp-nfs-primary", "10.10.0.231", "rm", "/mnt/nfs-demo/fortress-peer.txt"),
+                    *self._ssh_calls("tmp-nfs-peer", "10.10.0.232", "test", "!", "-e", "/mnt/nfs-demo/fortress-peer.txt"),
                     "vm-destroy tmp-nfs-primary --delete-vm-yaml",
                     "vm-destroy tmp-nfs-peer --delete-vm-yaml",
                     "nas-reconcile-plan --live truenas --acceptance-ephemeral-datasets --destroy-ephemeral-datasets --apply",
@@ -309,11 +298,24 @@ class AcceptanceNFSSharedMountWorkflowTests(unittest.TestCase):
         )
         (bin_dir / "ssh").chmod((bin_dir / "ssh").stat().st_mode | stat.S_IXUSR)
 
+    def _ssh_calls(self, vm, ip, *command):
+        remote_shell_command = f"sudo sh -lc {shlex.quote(shlex.join(command))}"
+        ssh_args = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-i /dev/shm/fortress/{vm}.key admin@{ip} {remote_shell_command}"
+        )
+        return [
+            f"decrypt-keys inventory/vms/{vm}.sops.yaml -- {ssh_args}",
+            ssh_args,
+        ]
+
     def _workflow_env(self, root, calls_log):
         env = os.environ.copy()
         env["FORTRESS_ROOT"] = str(root)
         env["CALLS_LOG"] = str(calls_log)
         env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+        env["FORTRESS_VERIFY_RETRIES"] = "1"
+        env["FORTRESS_VERIFY_RETRY_DELAY"] = "0"
         return env
 
 

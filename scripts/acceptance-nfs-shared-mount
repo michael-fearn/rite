@@ -2,8 +2,10 @@
 import ipaddress
 import json
 import os
+import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +66,7 @@ def main():
 
         for vm in intent["vms"]:
             command = [str(repo_root / "scripts" / "vm-up"), vm["name"]]
+            provisioned.append(vm["name"])
             if args["auto_confirm"]:
                 command.append("--auto-confirm")
                 up = run(command)
@@ -71,7 +74,6 @@ def main():
                 up = run(command, input_text=f"apply {vm['name']}\n")
             if up.returncode != 0:
                 return failed_after_generation(repo_root, intent, f"vm-up {vm['name']}", up, args["keep_on_fail"], generated, provisioned)
-            provisioned.append(vm["name"])
 
         verification = verify_shared_mount(repo_root, intent)
         if verification.returncode != 0:
@@ -304,7 +306,7 @@ def assert_reconcile_share(stdout, intent):
 def verify_shared_mount(repo_root, intent):
     hostvars = load_hostvars(repo_root)
     mount_point = intent["policy"]["mount"]["mount_point"]
-    unit = f"{mount_point.strip('/').replace('/', '-')}.mount"
+    unit = systemd_mount_unit(mount_point)
     checks = []
     for vm in intent["vms"]:
         checks.append((vm, ["systemctl", "is-active", unit], None))
@@ -325,12 +327,52 @@ def verify_shared_mount(repo_root, intent):
         ]
     )
     for vm, remote_command, expected_stdout in checks:
-        result = ssh_root(repo_root, vm["name"], hostvars, remote_command)
+        result = verify_ssh_check(repo_root, vm["name"], hostvars, remote_command, expected_stdout)
         if result.returncode != 0:
             return result
-        if expected_stdout is not None and result.stdout.strip() != expected_stdout:
-            return subprocess.CompletedProcess(remote_command, 1, result.stdout, f"expected {expected_stdout!r}, got {result.stdout.strip()!r}")
     return subprocess.CompletedProcess([], 0, "", "")
+
+
+def verify_ssh_check(repo_root, vm_name, hostvars, remote_command, expected_stdout):
+    attempts = int(os.environ.get("FORTRESS_VERIFY_RETRIES", "12"))
+    delay = float(os.environ.get("FORTRESS_VERIFY_RETRY_DELAY", "5"))
+    last_result = subprocess.CompletedProcess(remote_command, 1, "", "")
+    for attempt in range(attempts):
+        result = ssh_root(repo_root, vm_name, hostvars, remote_command)
+        if result.returncode == 0 and (expected_stdout is None or result.stdout.strip() == expected_stdout):
+            return result
+        if expected_stdout is not None and result.returncode == 0:
+            result = subprocess.CompletedProcess(
+                remote_command,
+                1,
+                result.stdout,
+                f"expected {expected_stdout!r}, got {result.stdout.strip()!r}",
+            )
+        last_result = result
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+    return last_result
+
+
+def systemd_mount_unit(mount_point):
+    normalized = "/".join(part for part in str(mount_point).split("/") if part)
+    if not normalized:
+        return "-.mount"
+
+    escaped = []
+    at_start = True
+    for char in normalized:
+        if char == "/":
+            escaped.append("-")
+            at_start = True
+            continue
+        allowed = char.isalnum() or char in ":_."
+        if allowed and not (at_start and char == "."):
+            escaped.append(char)
+        else:
+            escaped.extend(f"\\x{byte:02x}" for byte in char.encode())
+        at_start = False
+    return f"{''.join(escaped)}.mount"
 
 
 def load_hostvars(repo_root):
@@ -347,18 +389,24 @@ def ssh_root(repo_root, vm_name, hostvars, remote_command):
     vm_vars = hostvars.get(vm_name, {})
     ansible_host = _ansible_value(vm_vars.get("ansible_host"))
     key_file = _ansible_value(vm_vars.get("ansible_ssh_private_key_file"))
+    user = _ansible_value(vm_vars.get("ansible_user")) or "admin"
     if not ansible_host or not key_file:
         return subprocess.CompletedProcess(remote_command, 1, "", f"VM {vm_name} missing Ansible SSH connection vars")
+    remote_shell_command = f"sudo sh -lc {shlex.quote(shlex.join(remote_command))}"
     return run(
         [
             str(repo_root / "scripts" / "decrypt-keys"),
             f"inventory/vms/{vm_name}.sops.yaml",
             "--",
             "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
             "-i",
             key_file,
-            f"root@{ansible_host}",
-            *remote_command,
+            f"{user}@{ansible_host}",
+            remote_shell_command,
         ]
     )
 
@@ -426,7 +474,11 @@ def run(command, input_text=None):
 
 
 def phase_detail(result):
-    return (result.stderr or result.stdout or "").strip()
+    return "\n".join(
+        stream.strip()
+        for stream in (result.stdout, result.stderr)
+        if stream and stream.strip()
+    )
 
 
 if __name__ == "__main__":

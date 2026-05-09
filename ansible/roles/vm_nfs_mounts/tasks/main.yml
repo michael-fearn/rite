@@ -26,7 +26,7 @@
 - name: Render NFS systemd mount units
   ansible.builtin.template:
     src: nfs.mount.j2
-    dest: "{{ fortress_systemd_unit_dir | default('/etc/systemd/system') }}/{{ item.mount_point | regex_replace('^/+', '') | replace('/', '-') }}.mount"
+    dest: "{{ fortress_systemd_unit_dir | default('/etc/systemd/system') }}/{{ item.mount_point | fortress_systemd_mount_unit }}"
     mode: "0644"
   loop: "{{ fortress_vm.mounts | default([]) | selectattr('protocol', 'equalto', 'nfs') | list }}"
   loop_control:
@@ -35,7 +35,7 @@
 
 - name: Enable and start NFS mount units
   ansible.builtin.systemd:
-    name: "{{ item.item.mount_point | regex_replace('^/+', '') | replace('/', '-') }}.mount"
+    name: "{{ item.item.mount_point | fortress_systemd_mount_unit }}"
     daemon_reload: true
     enabled: true
     state: started

@@ -118,16 +118,16 @@ class TofuGenerationTests(unittest.TestCase):
         self.assertIn("vms = {", root_module)
         self.assertNotIn("vms = tomap({", root_module)
 
-    def test_root_tofu_module_filters_to_selected_vm_before_host_partitioning(self):
+    def test_root_tofu_module_keeps_host_sibling_vms_in_configuration(self):
         root_module = (REPO_ROOT / "tofu" / "main.tf").read_text()
         partitions = (REPO_ROOT / "fortress_tofu" / "generate.py").read_text()
 
         self.assertIn('variable "selected_vm"', root_module)
-        self.assertIn("selected_vms", root_module)
         self.assertIn("globals = yamldecode", root_module)
-        self.assertIn("for vm_name, vm in local.vms : vm_name => vm", root_module)
-        self.assertIn("if var.selected_vm == null || vm_name == var.selected_vm", root_module)
-        self.assertIn("local.selected_vms", partitions)
+        self.assertIn("vms = {", root_module)
+        self.assertNotIn("if var.selected_vm == null || vm_name == var.selected_vm", root_module)
+        self.assertIn("local.vms", partitions)
+        self.assertNotIn("local.selected_vms", partitions)
         self.assertIn("admin_user    = local.globals.vm_admin_user", partitions)
         self.assertIn('!endswith(basename(path), ".sops.yaml")', root_module)
         self.assertNotIn("vms = tomap({", root_module)

@@ -75,7 +75,7 @@ Use the first-class NFS shared-mount Acceptance Test to prove the path from Ephe
 4. Confirm the workflow prints the full intent and asks for one workflow-level confirmation. Use `auto_confirm=true` only when the generated VMs and NAS resources are expected.
 5. Confirm the workflow runs live NAS Reconcile with `scripts/nas-reconcile-plan --live truenas --acceptance-ephemeral-datasets --apply` before provisioning either VM.
 6. Confirm both generated VMs are provisioned through ordinary `vm-up`.
-7. Confirm the workflow checks `systemctl is-active mnt-nfs-demo.mount`, `findmnt /mnt/nfs-demo`, and bidirectional create/read/delete behavior over root SSH.
+7. Confirm the workflow checks `systemctl is-active mnt-nfs\x2ddemo.mount`, `findmnt /mnt/nfs-demo`, and bidirectional create/read/delete behavior over root SSH.
 8. Confirm default cleanup destroys `tmp-nfs-primary` and `tmp-nfs-peer` with `--delete-vm-yaml`, then runs `scripts/nas-reconcile-plan --live truenas --acceptance-ephemeral-datasets --destroy-ephemeral-datasets --apply` to destroy the fortress-owned NFS Share and fortress-marked Ephemeral Dataset.
 
 Use `keep_on_fail=true` when preserving generated VMs, generated Inventory/SOPS artifacts, and NAS acceptance resources would make debugging easier.

@@ -54,7 +54,7 @@ class NASTrueNASRunbookTests(unittest.TestCase):
         self.assertIn("read-only plan", runbook)
         self.assertIn("without mutating TrueNAS", runbook)
         self.assertIn("scripts/nas-reconcile-plan --live truenas --acceptance-ephemeral-datasets --apply", runbook)
-        self.assertIn("systemctl is-active mnt-nfs-demo.mount", runbook)
+        self.assertIn("systemctl is-active mnt-nfs\\x2ddemo.mount", runbook)
         self.assertIn("findmnt /mnt/nfs-demo", runbook)
         self.assertIn(
             "scripts/nas-reconcile-plan --live truenas --acceptance-ephemeral-datasets --destroy-ephemeral-datasets --apply",

@@ -99,6 +99,9 @@ def _nfs_share_payload(share):
         "access": "read_only" if share.get("ro") else "read_write",
         "clients": share.get("hosts") or share.get("networks") or [],
     }
+    for key in ("maproot_user", "maproot_group", "mapall_user", "mapall_group"):
+        if share.get(key):
+            payload[key] = share[key]
     if marker:
         payload["fortress_marker"] = marker
     return payload

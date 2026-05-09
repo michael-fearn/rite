@@ -55,6 +55,10 @@ def main():
     if destroy_result != 0:
         return destroy_result
 
+    state_result = remove_cloud_init_state(repo_root, host, vm)
+    if state_result != 0:
+        return state_result
+
     return delete_inventory_files(repo_root, vm, delete_vm_yaml)
 
 
@@ -76,6 +80,37 @@ def run_phase(phase, command, vm):
     if result.returncode != 0:
         print(f"{phase} failed for VM {vm}", file=sys.stderr)
         return result.returncode or 1
+    return 0
+
+
+def remove_cloud_init_state(repo_root, host, vm):
+    state_file = repo_root / "tofu" / "terraform.tfstate"
+    if not state_file.exists():
+        return 0
+    target = f'module.vms_{hcl_identifier(host)}.proxmox_virtual_environment_file.cloud_init_user_data["{vm}"]'
+    list_result = subprocess.run(
+        ["tofu", "state", "list"],
+        cwd=repo_root / "tofu",
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if list_result.returncode != 0:
+        print(f"tofu state list failed while cleaning cloud-init state for VM {vm}: {list_result.stderr}", file=sys.stderr)
+        return list_result.returncode or 1
+    if target not in list_result.stdout.splitlines():
+        return 0
+    rm_result = subprocess.run(
+        ["tofu", "state", "rm", target],
+        cwd=repo_root / "tofu",
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if rm_result.returncode != 0:
+        print(f"tofu state rm failed while cleaning cloud-init state for VM {vm}: {rm_result.stderr}", file=sys.stderr)
+        return rm_result.returncode or 1
+    print(rm_result.stdout, end="")
     return 0
 
 

@@ -114,7 +114,7 @@ def render_vm_partitions_hcl(hosts):
                     "  admin_user    = local.globals.vm_admin_user",
                     "  templates     = local.templates",
                     "  vms = {",
-                    f'    for vm_name, vm in local.selected_vms : vm_name => vm if vm.placement.host == "{host_name}"',
+                    f'    for vm_name, vm in local.vms : vm_name => vm if vm.placement.host == "{host_name}"',
                     "  }",
                     "}",
                     "",

@@ -265,7 +265,7 @@ def _write_action_target(action):
 
 
 def _owned_share_payload(desired):
-    return {
+    payload = {
         "name": desired["name"],
         "path": desired["path"],
         "protocol": desired["protocol"],
@@ -274,6 +274,10 @@ def _owned_share_payload(desired):
         "fortress_owned": True,
         "fortress_marker": _fortress_marker(desired["name"]),
     }
+    for key in ("maproot_user", "maproot_group", "mapall_user", "mapall_group"):
+        if desired.get(key):
+            payload[key] = desired[key]
+    return payload
 
 
 def _fortress_marker(name):
@@ -281,7 +285,7 @@ def _fortress_marker(name):
 
 
 def _share_drifted(existing, desired):
-    for key in ("path", "access", "clients", "fortress_marker"):
+    for key in ("path", "access", "clients", "fortress_marker", "maproot_user", "maproot_group", "mapall_user", "mapall_group"):
         if existing.get(key) != desired.get(key):
             return True
     return False
@@ -362,21 +366,29 @@ def derive_desired_nfs_shares(inventory, include_ephemeral_datasets=False):
             dataset = datasets_by_name.get(dataset_name)
             if not dataset:
                 continue
-            key = (dataset_name, dataset.get("path"), mount.get("protocol"), mount.get("access"))
+            key = (
+                dataset_name,
+                dataset.get("path"),
+                mount.get("protocol"),
+                mount.get("access"),
+                dataset.get("lifecycle"),
+            )
             grouped.setdefault(key, set()).update(clients)
 
     desired = []
-    for (dataset_name, path, protocol, access), clients in sorted(grouped.items()):
-        desired.append(
-            {
-                "name": f"fortress-{protocol}-{dataset_name}-{access.replace('_', '-')}",
-                "dataset": dataset_name,
-                "path": path,
-                "protocol": protocol,
-                "access": access,
-                "clients": sorted(clients),
-            }
-        )
+    for (dataset_name, path, protocol, access, lifecycle), clients in sorted(grouped.items()):
+        share = {
+            "name": f"fortress-{protocol}-{dataset_name}-{access.replace('_', '-')}",
+            "dataset": dataset_name,
+            "path": path,
+            "protocol": protocol,
+            "access": access,
+            "clients": sorted(clients),
+        }
+        if lifecycle == "ephemeral":
+            share["maproot_user"] = "root"
+            share["maproot_group"] = "root"
+        desired.append(share)
     return desired
 
 

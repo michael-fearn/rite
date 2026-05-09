@@ -29,8 +29,4 @@ locals {
     trimsuffix(basename(path), ".yaml") => yamldecode(file("../inventory/templates/${path}"))
     if !startswith(basename(path), "_")
   })
-  selected_vms = {
-    for vm_name, vm in local.vms : vm_name => vm
-    if var.selected_vm == null || vm_name == var.selected_vm
-  }
 }

@@ -7,6 +7,10 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MEDIA01_TARGETS = (
+    '-target module.vms_wintermute.proxmox_virtual_environment_file.cloud_init_user_data["media01"] '
+    '-target module.vms_wintermute.proxmox_virtual_environment_vm.vm["media01"]'
+)
 
 
 class VMUpWorkflowTests(unittest.TestCase):
@@ -60,8 +64,8 @@ class VMUpWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 [
                     "vm-prepare media01",
-                    "tofu-wrap plan -var selected_vm=media01",
-                    "tofu-wrap apply -var selected_vm=media01 -auto-approve",
+                    f"tofu-wrap plan -var selected_vm=media01 {MEDIA01_TARGETS}",
+                    f"tofu-wrap apply -var selected_vm=media01 {MEDIA01_TARGETS} -auto-approve",
                     "vm-configure media01",
                 ],
                 calls_log.read_text().splitlines(),
@@ -87,7 +91,7 @@ class VMUpWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 [
                     "vm-prepare media01",
-                    "tofu-wrap plan -var selected_vm=media01",
+                    f"tofu-wrap plan -var selected_vm=media01 {MEDIA01_TARGETS}",
                 ],
                 calls_log.read_text().splitlines(),
             )
@@ -110,8 +114,8 @@ class VMUpWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 [
                     "vm-prepare media01",
-                    "tofu-wrap plan -var selected_vm=media01",
-                    "tofu-wrap apply -var selected_vm=media01 -auto-approve",
+                    f"tofu-wrap plan -var selected_vm=media01 {MEDIA01_TARGETS}",
+                    f"tofu-wrap apply -var selected_vm=media01 {MEDIA01_TARGETS} -auto-approve",
                     "vm-configure media01",
                 ],
                 calls_log.read_text().splitlines(),
@@ -137,22 +141,22 @@ class VMUpWorkflowTests(unittest.TestCase):
             ),
             "tofu-plan": (
                 "tofu plan failed for VM media01",
-                ["vm-prepare media01", "tofu-wrap plan -var selected_vm=media01"],
+                ["vm-prepare media01", f"tofu-wrap plan -var selected_vm=media01 {MEDIA01_TARGETS}"],
             ),
             "tofu-apply": (
                 "tofu apply failed for VM media01",
                 [
                     "vm-prepare media01",
-                    "tofu-wrap plan -var selected_vm=media01",
-                    "tofu-wrap apply -var selected_vm=media01 -auto-approve",
+                    f"tofu-wrap plan -var selected_vm=media01 {MEDIA01_TARGETS}",
+                    f"tofu-wrap apply -var selected_vm=media01 {MEDIA01_TARGETS} -auto-approve",
                 ],
             ),
             "vm-configure": (
                 "Configure failed for VM media01",
                 [
                     "vm-prepare media01",
-                    "tofu-wrap plan -var selected_vm=media01",
-                    "tofu-wrap apply -var selected_vm=media01 -auto-approve",
+                    f"tofu-wrap plan -var selected_vm=media01 {MEDIA01_TARGETS}",
+                    f"tofu-wrap apply -var selected_vm=media01 {MEDIA01_TARGETS} -auto-approve",
                     "vm-configure media01",
                 ],
             ),
