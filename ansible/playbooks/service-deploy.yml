@@ -14,6 +14,13 @@
       loop: "{{ fortress_service_volume_subpath_stats.results | default([]) }}"
       when: not item.stat.exists
 
+    - name: Install Service Secrets as Podman secrets
+      ansible.builtin.command:
+        cmd: "podman secret create --replace {{ item.podman_name }} -"
+        stdin: "{{ lookup('pipe', 'sops --decrypt --extract ' ~ item.sops_extract | quote ~ ' ' ~ fortress_service_sops_file | quote) }}"
+      loop: "{{ fortress_service_secrets | default([]) }}"
+      no_log: true
+
     - name: Start Service containers
       ansible.builtin.debug:
         msg: "TODO: render and start {{ deploy_service }}"

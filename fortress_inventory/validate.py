@@ -126,6 +126,7 @@ def _validate_quadlet_services(model):
     errors.extend(_validate_service_images(model))
     errors.extend(_validate_service_groups(model))
     errors.extend(_validate_container_dependencies(model))
+    errors.extend(_validate_service_secrets(model))
     return errors
 
 
@@ -300,6 +301,104 @@ def _has_dependency_cycle(graph):
         return False
 
     return any(visit(container_name) for container_name in graph)
+
+
+def _validate_service_secrets(model):
+    errors = []
+    for service_name, service in model.services.items():
+        if service.get("deploy", {}).get("type") != "quadlet":
+            continue
+        for container_index, container in enumerate(service.get("deploy", {}).get("containers", []) or []):
+            env_names = set((container.get("env") or {}).keys())
+            secret_env_names = set()
+            for secret_index, secret in enumerate(container.get("secrets", []) or []):
+                secret_ref = secret.get("secret")
+                secret_env = secret.get("env")
+                if secret_ref and not secret_ref.startswith("secrets."):
+                    errors.append(
+                        ValidationError(
+                            "service_secret_reference_not_sibling_sops_secret",
+                            _service_secret_path(service_name, container_index, secret_index, "secret"),
+                            f"Service {service_name} Service Secret references must use secrets.<name>",
+                        )
+                    )
+                if secret_env and not secret_env.endswith("_FILE"):
+                    errors.append(
+                        ValidationError(
+                            "service_secret_env_not_file",
+                            _service_secret_path(service_name, container_index, secret_index, "env"),
+                            f"Service {service_name} Service Secret env {secret_env} must end in _FILE",
+                        )
+                    )
+                if secret_env in secret_env_names:
+                    errors.append(
+                        ValidationError(
+                            "service_env_conflict",
+                            _service_secret_path(service_name, container_index, secret_index, "env"),
+                            f"Service {service_name} container {container.get('name', container_index)} "
+                            f"declares duplicate generated environment variable {secret_env}",
+                        )
+                    )
+                secret_env_names.add(secret_env)
+
+            conflict = sorted(env_names & secret_env_names)
+            if conflict:
+                errors.append(
+                    ValidationError(
+                        "service_env_conflict",
+                        f"inventory/services/{service_name}.yaml.deploy.containers[{container_index}].env",
+                        f"Service {service_name} container {container.get('name', container_index)} "
+                        f"declares environment variable {conflict[0]} both as env and as a Service Secret",
+                    )
+                )
+
+            fragment_env_names = _quadlet_fragment_environment_names(model, service_name, container)
+            conflict = sorted((env_names | secret_env_names) & fragment_env_names)
+            if conflict:
+                errors.append(
+                    ValidationError(
+                        "service_env_conflict",
+                        f"inventory/services/{service_name}.quadlet.d/{container.get('name')}.container",
+                        f"Service {service_name} Quadlet Fragment cannot override environment variable "
+                        f"{conflict[0]} owned by Service yaml",
+                    )
+                )
+    return errors
+
+
+def _quadlet_fragment_environment_names(model, service_name, container):
+    root = getattr(model, "root", None)
+    if root is None:
+        return set()
+    fragment_path = (
+        root
+        / "inventory"
+        / "services"
+        / f"{service_name}.quadlet.d"
+        / f"{container.get('name')}.container"
+    )
+    if not fragment_path.is_file():
+        return set()
+    names = set()
+    section = None
+    for raw_line in fragment_path.read_text().splitlines():
+        line = raw_line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if section != "Container" or not line.startswith("Environment="):
+            continue
+        assignment = line.split("=", 1)[1]
+        if "=" in assignment:
+            names.add(assignment.split("=", 1)[0])
+    return names
+
+
+def _service_secret_path(service_name, container_index, secret_index, field):
+    return (
+        f"inventory/services/{service_name}.yaml.deploy.containers"
+        f"[{container_index}].secrets[{secret_index}].{field}"
+    )
 
 
 def _validate_service_hostnames(model):

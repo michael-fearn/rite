@@ -17,3 +17,28 @@ def share_backed_volume_subpaths(service, vm):
             mount = mount_by_name[mount_name]
             subpaths.append(str(PurePosixPath(mount["mount_point"]) / source))
     return subpaths
+
+
+def service_secret_installations(service):
+    installations = []
+    seen = set()
+    for container in service.get("deploy", {}).get("containers", []) or []:
+        for secret in container.get("secrets", []) or []:
+            secret_key = service_secret_key(secret)
+            if secret_key in seen:
+                continue
+            seen.add(secret_key)
+            installations.append(
+                {
+                    "podman_name": f"fortress_{service['name']}_{secret_key}",
+                    "sops_extract": f'["secrets"]["{secret_key}"]',
+                }
+            )
+    return installations
+
+
+def service_secret_key(secret):
+    reference = secret["secret"]
+    if reference.startswith("secrets."):
+        return reference.split(".", 1)[1]
+    return reference

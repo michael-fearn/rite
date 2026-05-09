@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fortress_inventory.model import load_inventory_tree
 from fortress_inventory.validate import validate_inventory_model
-from fortress_services.deploy import share_backed_volume_subpaths
+from fortress_services.deploy import service_secret_installations, share_backed_volume_subpaths
 
 
 def main():
@@ -42,12 +42,25 @@ def main():
         print(f"VM Sibling SOPS File is required at {vm_sops}. Run VM Prepare first.", file=sys.stderr)
         return 1
 
+    service_secrets = service_secret_installations(service)
+    service_sops = repo_root / "inventory" / "services" / f"{service_name}.sops.yaml"
+    if service_secrets and not service_sops.is_file():
+        print(
+            f"Service Sibling SOPS File is required at {service_sops} because Service {service_name} "
+            "declares Service Secrets.",
+            file=sys.stderr,
+        )
+        return 1
+
     extra_vars = {
         "deploy_service": service_name,
         "deploy_service_backend_vm": backend_vm_name,
         "fortress_service": service,
         "fortress_share_backed_volume_subpaths": share_backed_volume_subpaths(service, backend_vm),
+        "fortress_service_secrets": service_secrets,
     }
+    if service_secrets:
+        extra_vars["fortress_service_sops_file"] = str(service_sops)
     try:
         subprocess.run(
             [

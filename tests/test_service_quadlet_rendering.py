@@ -114,6 +114,32 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
 
         self.assert_golden_artifacts(rendered, GOLDEN_FIXTURES / "isolated_share_root")
 
+    def test_golden_service_secret_injection_rendering(self):
+        service = {
+            "name": "paperless",
+            "backend": {"vm": "media01", "port": 8000},
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "web",
+                        "image": "ghcr.io/paperless-ngx/paperless-ngx:2.13.5",
+                        "env": {"PAPERLESS_URL": "https://paperless.fearn.cloud"},
+                        "secrets": [
+                            {
+                                "secret": "secrets.admin_password",
+                                "env": "PAPERLESS_ADMIN_PASSWORD_FILE",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+
+        rendered = render_quadlet_service(service, {})
+
+        self.assert_golden_artifacts(rendered, GOLDEN_FIXTURES / "service_secret_injection")
+
     def test_golden_quadlet_fragment_merge(self):
         service = {
             "name": "immich",
@@ -204,6 +230,43 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
         self.assertIn("NetworkAlias=server\n", container.content)
         self.assertIn("PublishPort=127.0.0.1:2283:2283/tcp\n", container.content)
         self.assertNotIn("AutoUpdate", container.content)
+
+    def test_container_renders_non_secret_env_and_service_secret_file_env(self):
+        service = {
+            "name": "paperless",
+            "backend": {"vm": "media01", "port": 8000},
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "web",
+                        "image": "ghcr.io/paperless-ngx/paperless-ngx:2.13.5",
+                        "env": {
+                            "PAPERLESS_URL": "https://paperless.fearn.cloud",
+                            "PAPERLESS_ENABLE_HTTP_REMOTE_USER": True,
+                        },
+                        "secrets": [
+                            {
+                                "secret": "secrets.admin_password",
+                                "env": "PAPERLESS_ADMIN_PASSWORD_FILE",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+
+        rendered = render_quadlet_service(service, {})
+
+        container = rendered.artifacts_by_filename["fortress-paperless-web.container"]
+        self.assertIn("Environment=PAPERLESS_URL=https://paperless.fearn.cloud\n", container.content)
+        self.assertIn("Environment=PAPERLESS_ENABLE_HTTP_REMOTE_USER=true\n", container.content)
+        self.assertIn("Secret=fortress_paperless_admin_password\n", container.content)
+        self.assertIn(
+            "Environment=PAPERLESS_ADMIN_PASSWORD_FILE=/run/secrets/fortress_paperless_admin_password\n",
+            container.content,
+        )
+        self.assertNotIn("admin_password: ", container.content)
 
     def test_container_dependencies_render_same_service_start_order_and_stop_coupling(self):
         service = {

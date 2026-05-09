@@ -7,6 +7,7 @@ from .simple_yaml import load_yaml
 
 @dataclass(frozen=True)
 class InventoryModel:
+    root: Path
     hosts: dict
     vms: dict
     services: dict
@@ -23,6 +24,7 @@ def load_inventory_tree(root):
     inventory_root = root / "inventory"
     services = _load_entity_dir(inventory_root / "services")
     return InventoryModel(
+        root=root,
         hosts=_load_entity_dir(inventory_root / "hosts"),
         vms=_load_entity_dir(inventory_root / "vms"),
         services=_default_services(services),

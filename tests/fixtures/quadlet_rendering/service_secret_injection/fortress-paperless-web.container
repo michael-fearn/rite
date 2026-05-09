@@ -1,0 +1,11 @@
+[Unit]
+Description=Fortress Service paperless container web
+
+[Container]
+ContainerName=fortress-paperless-web
+Image=ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+Network=fortress-paperless
+NetworkAlias=web
+Environment=PAPERLESS_URL=https://paperless.fearn.cloud
+Secret=fortress_paperless_admin_password
+Environment=PAPERLESS_ADMIN_PASSWORD_FILE=/run/secrets/fortress_paperless_admin_password

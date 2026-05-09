@@ -379,6 +379,71 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
                 self.assertIn("unsafe_service_volume_source", {error.code for error in validate_inventory_tree(root)})
 
+    def test_service_secret_references_must_use_file_env_and_sibling_sops_namespace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "services" / "immich.yaml").write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      secrets:\n"
+                "        - secret: admin_password\n"
+                "          env: IMMICH_ADMIN_PASSWORD\n"
+            )
+
+            codes = {error.code for error in validate_inventory_tree(root)}
+
+            self.assertIn("service_secret_reference_not_sibling_sops_secret", codes)
+            self.assertIn("service_secret_env_not_file", codes)
+
+    def test_service_environment_names_must_not_conflict_with_secret_file_env_or_fragments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            service_path = root / "inventory" / "services" / "immich.yaml"
+            service_path.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      env:\n"
+                "        IMMICH_DB_PASSWORD_FILE: /tmp/plaintext\n"
+                "      secrets:\n"
+                "        - secret: secrets.db_password\n"
+                "          env: IMMICH_DB_PASSWORD_FILE\n"
+            )
+
+            self.assertIn("service_env_conflict", {error.code for error in validate_inventory_tree(root)})
+
+            service_path.write_text(
+                service_path.read_text().replace(
+                    "      env:\n"
+                    "        IMMICH_DB_PASSWORD_FILE: /tmp/plaintext\n",
+                    "      env:\n"
+                    "        IMMICH_URL: https://photos.fearn.cloud\n",
+                )
+            )
+            fragment_dir = root / "inventory" / "services" / "immich.quadlet.d"
+            fragment_dir.mkdir()
+            (fragment_dir / "server.container").write_text(
+                "[Container]\n"
+                "Environment=IMMICH_URL=https://override.fearn.cloud\n"
+            )
+
+            self.assertIn("service_env_conflict", {error.code for error in validate_inventory_tree(root)})
+
     def test_vm_placement_host_must_exist(self):
         self.assertIn("missing_vm_host", self.codes_for("inventory_invalid/missing-vm-host"))
 

@@ -102,6 +102,14 @@ def render_quadlet_container(service, vm, container):
     for published_port in container.get("published_ports", []) or []:
         lines.append(f"PublishPort={_published_port(published_port)}")
 
+    for name, value in (container.get("env") or {}).items():
+        lines.append(f"Environment={name}={_quadlet_env_value(value)}")
+
+    for secret in container.get("secrets", []) or []:
+        secret_name = _service_secret_name(service, secret)
+        lines.append(f"Secret={secret_name}")
+        lines.append(f"Environment={secret['env']}=/run/secrets/{secret_name}")
+
     for volume in container.get("volumes", []) or []:
         if volume.get("mount"):
             mount = mount_by_name[volume["mount"]]
@@ -154,6 +162,23 @@ def _published_port(published_port):
     if bind:
         return f"{bind}:{host}:{container}/{protocol_suffix}"
     return f"{host}:{container}/{protocol_suffix}"
+
+
+def _quadlet_env_value(value):
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+def _service_secret_name(service, secret):
+    return f"fortress_{service['name']}_{_service_secret_key(secret)}"
+
+
+def _service_secret_key(secret):
+    reference = secret["secret"]
+    if not reference.startswith("secrets."):
+        return reference
+    return reference.split(".", 1)[1]
 
 
 def _unique_units(units):
@@ -230,6 +255,7 @@ def _artifact_with_fragment(filename, content, fragment_content=None):
 
 def _merge_quadlet_fragment(generated_content, fragment_content):
     generated_keys = _quadlet_keys(generated_content)
+    generated_environment_names = _quadlet_environment_names(generated_content)
     insertions = _quadlet_entries(fragment_content)
     additive_values = {}
     additions_by_section = {}
@@ -237,6 +263,15 @@ def _merge_quadlet_fragment(generated_content, fragment_content):
         if section in RESERVED_FRAGMENT_SECTIONS or (section, key) in RESERVED_FRAGMENT_KEYS:
             raise ValueError(f"Quadlet Fragment uses reserved fortress-owned key: {section}.{key}")
         if (section, key) in generated_keys:
+            if (section, key) == ("Container", "Environment"):
+                environment_name = _environment_name(value)
+                if environment_name in generated_environment_names:
+                    raise ValueError(
+                        "Quadlet Fragment cannot override fortress-owned environment variable: "
+                        f"{environment_name}"
+                    )
+                additions_by_section.setdefault(section, []).append(f"{key}={value}")
+                continue
             if (section, key) in ADDITIVE_FRAGMENT_KEYS:
                 additive_values.setdefault((section, key), []).extend(value.split())
                 continue
@@ -308,6 +343,18 @@ def _quadlet_entries(content):
         key, value = line.split("=", 1)
         entries.append((section, key.strip(), value.strip()))
     return entries
+
+
+def _quadlet_environment_names(content):
+    return {
+        _environment_name(value)
+        for section, key, value in _quadlet_entries(content)
+        if (section, key) == ("Container", "Environment")
+    }
+
+
+def _environment_name(value):
+    return value.split("=", 1)[0]
 
 
 def _section_name(line):
