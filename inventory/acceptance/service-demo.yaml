@@ -1,0 +1,51 @@
+name: fortress-service-demo
+hostname: fortress-service-demo.fearn.cloud
+service_group: service-demo
+service_data_owner:
+  uid: 1000
+  gid: 1000
+backend:
+  vm: wintermute-demo
+  port: 8080
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: web
+      image: docker.io/library/nginx:1.27
+      depends_on: [postgres, redis]
+      published_ports:
+        - bind: 127.0.0.1
+          host: 8080
+          container: 80
+          ingress: true
+        - bind: 127.0.0.1
+          host: 18080
+          container: 8080
+      volumes:
+        - service_path: web
+          container: /usr/share/nginx/html
+          access: read_write
+        - mount: nfs-demo
+          source: /
+          container: /mnt/shared
+          access: read_write
+      secrets:
+        - secret: secrets.demo_password
+          env: DEMO_PASSWORD_FILE
+    - name: postgres
+      image: docker.io/library/postgres:16
+      secrets:
+        - secret: secrets.demo_password
+          env: POSTGRES_PASSWORD_FILE
+      volumes:
+        - service_path: postgres
+          container: /var/lib/postgresql/data
+          access: read_write
+    - name: redis
+      image: docker.io/library/redis:7

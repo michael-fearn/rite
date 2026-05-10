@@ -1,0 +1,2 @@
+secrets:
+  demo_password: encrypt-this-with-sops-before-live-demo
