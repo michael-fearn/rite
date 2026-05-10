@@ -1,3 +1,5 @@
 # PBS client-side encryption from day one
 
 The PBS VM is initialised with client-side encryption enabled; the master key is stored in both `inventory/vms/pbs.sops.yaml` and at the offline backup location, alongside the offline age key. PBS chunks cannot be re-encrypted in place — turning encryption on later means a fresh datastore plus new full backups across the whole fleet. Adding off-site replication later is ergonomic only if existing chunks are already encrypted. Master-key rotation is incident-only, not routine; loss of the master key without the offline copy is loss of all backups, by design.
+
+PBS placement details are superseded by ADR-0020 and the Homelab Firewall Matrix. The current layout places `pbs-vm` on the `straylight` Host.

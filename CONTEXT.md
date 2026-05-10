@@ -50,6 +50,26 @@ _Avoid_: app, workload; "systemd service" (always qualify as "systemd unit").
 A named set of one or more Services on the same VM that intentionally share a VM-local Podman network for private Service-to-Service communication.
 _Avoid_: stack (too Compose-specific), app suite.
 
+**Media VM**:
+The Apps VLAN VM that runs media playback, request, catalog, and indexer Services such as Jellyfin, Overseerr, Sonarr, Radarr, Lidarr, Prowlarr, and Bazarr.
+_Avoid_: media automation VM, Jellyfin VM.
+
+**Download VM**:
+The Apps VLAN VM that runs downloader Services such as qBittorrent, SABnzbd, NZBGet, and VPN-bound download components.
+_Avoid_: downloader container, media automation VM.
+
+**Immich VM**:
+The Apps VLAN VM that runs the Immich Service Group, including Immich application containers, Postgres, and Redis.
+_Avoid_: photos VM, shared database client.
+
+**File Browser VM**:
+The Apps VLAN VM that fronts the personal media Dataset for Trusted-only file access.
+_Avoid_: files container, NAS UI.
+
+**Vaultwarden VM**:
+The Apps VLAN VM that runs Vaultwarden with VM-local primary data.
+_Avoid_: password manager container, shared secrets VM.
+
 **Backend**:
 The VM (and TCP port) that the Ingress reverse-proxies a Service to. Declared as `backend.vm` and `backend.port`. Becomes a list when the Service is HA.
 _Avoid_: upstream (overloaded with apt/git senses).
@@ -85,6 +105,30 @@ _Avoid_: catalog, registry.
 **Infrastructure VLAN**:
 VLAN 40 (`10.40.0.0/24`), the routed network for static infrastructure Services such as the Ingress.
 _Avoid_: management network, apps network.
+
+**Trusted VLAN**:
+VLAN 20 (`10.20.0.0/24`), the routed network for admin workstations flagged as trusted by router policy.
+_Avoid_: ordinary client network, user LAN.
+
+**Known VLAN**:
+VLAN 25 (`10.25.0.0/24`), the routed network for ordinary non-admin clients.
+_Avoid_: trusted network, guest network.
+
+**IoT VLAN**:
+VLAN 30 (`10.30.0.0/24`), the routed network for appliance-style clients that are denied internal access by default.
+_Avoid_: smart home LAN, trusted devices.
+
+**Guest VLAN**:
+VLAN 70 (`10.70.0.0/24`), the internet-only client network with no access to internal DNS or internal VLANs.
+_Avoid_: visitor LAN, untrusted LAN.
+
+**DMZ VLAN**:
+VLAN 60 (`10.60.0.0/24`), the future public-service network with a separate ingress and authentication stack from internal Services.
+_Avoid_: public app subnet, external ingress.
+
+**Firewall Matrix**:
+The implementation-facing source of truth for VLAN layout, service placement intent, and inter-VLAN access expectations.
+_Avoid_: router config, firewall export.
 
 ### Operator and ceremony
 
@@ -169,16 +213,44 @@ The escape-hatch substrate: an apt package plus a systemd unit, configured by An
 _Avoid_: bare-metal (the VM is still a VM); package install.
 
 **Ingress**:
-The single VM named `ingress`, placed on the `straylight` Host, that terminates TLS and reverse-proxies all `*.fearn.cloud` traffic to backing Services.
+The VM named `internal-ingress-vm`, placed on the `straylight` Host, that terminates TLS and reverse-proxies internal HTTP traffic to backing Services.
 _Avoid_: edge, gateway, proxy (reserve "proxy" for the verb).
+
+**DNS VM**:
+An Infrastructure VLAN VM that runs Pi-hole and Unbound as a complete internal resolver.
+_Avoid_: DNS server, resolver appliance.
+
+**Forgejo VM**:
+The Infrastructure VLAN VM that runs Forgejo and does not run CI runner workloads.
+_Avoid_: git server, runner host.
+
+**Forgejo Runner VM**:
+A future VM for Forgejo runner workloads, separate from the Forgejo VM.
+_Avoid_: co-located runner, build container on Forgejo.
+
+**Observability VM**:
+The Infrastructure VLAN VM that runs metrics, alerting, dashboard, log aggregation, and blackbox-check Services.
+_Avoid_: monitoring stack, logs box.
+
+**Headscale VM**:
+The Infrastructure VLAN VM that runs the local-only tailnet control plane.
+_Avoid_: public VPN server, remote enrollment service.
+
+**Identity VM**:
+The Infrastructure VLAN VM that runs Authentik as the local-only identity provider for internal ingress authentication.
+_Avoid_: SSO box, auth server.
 
 **Exposure**:
 A Service's ingress visibility, declared on `ingress.exposure` (e.g. `lan_only`). The full enum is not yet pinned — see flagged ambiguities.
 
+**Ingress Auth**:
+A Service's explicit internal ingress authentication requirement, satisfied by the Identity VM when enabled.
+_Avoid_: global auth, auth-by-default.
+
 ### Backups and storage
 
 **PBS**:
-Proxmox Backup Server, deployed in this project as a VM on `neuromancer`.
+Proxmox Backup Server, deployed in this project as a VM on the `straylight` Host.
 _Avoid_: PVE backup (a separate Proxmox feature).
 
 **Datastore**:
@@ -198,7 +270,7 @@ The address fortress uses to reach a NAS Endpoint's management API.
 _Avoid_: NAS address, server address.
 
 **Share Address**:
-The address VMs use to consume Shares from a NAS Endpoint.
+The stable client-facing address VMs use to consume Shares from a NAS Endpoint.
 _Avoid_: NAS address, management address.
 
 **NAS Reconcile Credential**:
@@ -268,10 +340,37 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 
 - A **Host** runs zero or more **VMs** and holds zero or more **Templates**.
 - A **VM** is provisioned from one **Template** and runs zero or more **Services**.
-- The **Ingress** VM is attached to the **Infrastructure VLAN** at `10.40.0.11/24`.
+- The **Firewall Matrix** supersedes earlier service placement and NAS mount layout notes.
+- The **Ingress** VM is attached to the **Infrastructure VLAN** at `10.40.0.16/24`.
+- The primary **DNS VM** is `dns-primary-vm` at `10.40.0.11/24` on the `straylight` Host.
+- The secondary **DNS VM** is `dns-secondary-vm` at `10.40.0.18/24` on the `molly` Host.
+- Primary and secondary **DNS VMs** are functionally identical peers.
+- The **Forgejo VM** is `forgejo-vm` at `10.40.0.12/24` on the `straylight` Host.
+- **Forgejo Runner VMs** must not be co-located on the **Forgejo VM**.
+- The **Observability VM** is `observability-vm` at `10.40.0.17/24` on the `straylight` Host.
+- The **Observability VM** groups Prometheus, Alertmanager, Grafana, Loki, and Blackbox Exporter.
+- The **Headscale VM** is `headscale-vm` at `10.40.0.14/24` on the `straylight` Host.
+- The **Headscale VM** is local-only; remote devices must be enrolled while local or with a short-lived pre-auth key minted while local.
+- The **Identity VM** is an Infrastructure VLAN **VM** and must remain local-only.
+- The **Identity VM** is `identity-vm` at `10.40.0.19/24` on the `straylight` Host.
+- Headscale does not depend on the **Identity VM** until a later explicit OIDC integration decision.
 - A **Dataset** is declared in `inventory/datasets/<dataset>.yaml`.
 - A **Service Group** contains one or more **Services** on the same **VM**.
 - A **Service Group** name is globally unique within the **Inventory**.
+- Media request and playback Services may share a **Service Group** when they have the same storage access and trust boundary.
+- Download clients must run on a separate **VM** from media request and playback Services.
+- The **Media VM** and **Download VM** both consume the media Dataset, while individual **Services** narrow their visible paths through **Share-backed Volumes**.
+- The **Media VM** and **Download VM** mount the media Dataset read-write at the **VM** level, while individual **Services** use **Share-backed Volume** subpaths to narrow read/write exposure.
+- Jellyfin uses read-only media library **Share-backed Volumes**.
+- Overseerr does not consume the media Dataset unless a later explicit requirement appears.
+- The **Immich VM** keeps Immich database and cache state VM-local and consumes the Immich Dataset for library storage.
+- The **File Browser VM** is a standalone **VM** and is the only Apps VLAN **VM** that consumes the personal media Dataset.
+- The **Vaultwarden VM** is a standalone **VM** and does not use NAS-backed live storage by default.
+- The **Vaultwarden VM** is `vaultwarden-vm` at `10.50.0.11/24` on the `neuromancer` Host.
+- The **Immich VM** is `immich-vm` at `10.50.0.12/24` on the `neuromancer` Host.
+- The **Media VM** is `media-vm` at `10.50.0.13/24` on the `neuromancer` Host.
+- The **Download VM** is `download-vm` at `10.50.0.14/24` on the `neuromancer` Host.
+- The **File Browser VM** is `file-browser-vm` at `10.50.0.15/24` on the `neuromancer` Host.
 - VMIDs `100`-`8899` are for ordinary **VMs**, `8900`-`8999` are for **Operational VMs**, and `9000`-`9999` are for **Templates**.
 - VM names beginning with `tmp-` are reserved for generated temporary **VMs** and must not be checked in as ordinary Inventory.
 - A **Template Verification VM** is provisioned from exactly one **Template** on exactly one **Host** and destroyed after verification.
@@ -286,6 +385,8 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Published Port** may use TCP, UDP, or both; only TCP-capable Published Ports may satisfy a **Backend**.
 - **Ingress** is HTTP-family routing only; non-HTTP Published Ports are exposed directly on the **Backend** VM rather than through Caddy.
 - A **Published Port** must opt into **Ingress** routing explicitly; direct VM exposure is deliberate through its bind address.
+- User-facing HTTP Services on the **Media VM** and **Download VM** are exposed through the **Ingress** for DNS and TLS.
+- Direct client access to media and download backend ports is reserved for explicit Trusted-only emergency or administration paths.
 - A **Service Data Directory** belongs to exactly one **Service** and is the default root for Service-owned bind mounts.
 - A **Service Data Owner** applies only to Service-owned data; Share-backed Volume ownership follows the VM Mount and NAS ownership convention.
 - A **Service Path** is always explicit in Service yaml when a container uses Service-owned bind-mounted data.
@@ -298,6 +399,16 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - Fortress-owned runtime artifacts use a `fortress-` prefix; Podman container and systemd unit identity is `fortress-<service>-<container>`, while the **Container Alias** remains the declared container name.
 - The **Ingress** **VM** routes traffic to **Services** by hostname.
 - A **Service** needs a hostname only when **Ingress** is enabled.
+- **Ingress Auth** is explicit per **Service** and is not applied globally by default.
+- The **Ingress** performs internal HTTP routing and TLS termination; the **Identity VM** does not replace the **Ingress**.
+- The **Identity VM** provides **Ingress Auth** only for **Services** that explicitly declare it.
+- The **Identity VM** is reached through the **Ingress** for normal Authentik user and admin flows.
+- Direct access to the **Identity VM** backend is a Trusted-only recovery path.
+- The **Known VLAN** reaches approved user-facing internal HTTP **Services** through the **Ingress** and does not reach backend or administration ports directly.
+- The **IoT VLAN** is denied to internal VLANs by default except for DNS, time, and explicit per-device or per-Service exceptions.
+- The **Guest VLAN** uses only UDM or approved non-internal DNS and does not resolve or reach internal `*.fearn.cloud` Services.
+- The **DMZ VLAN** does not use the internal **Ingress** or **Identity VM**; future DMZ workloads will use a separate ingress and authentication stack.
+- DMZ ingress rules are future-only and are not part of the internal firewall baseline.
 - Every **Entity** may have a **Sibling SOPS File**.
 - A **Service Secret** belongs to exactly one **Service** and is installed under a service-scoped Podman secret name.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
