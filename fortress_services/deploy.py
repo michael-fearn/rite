@@ -42,6 +42,7 @@ def service_secret_installations(service):
 def quadlet_deploy_vars(service, vm, inventory_root=None):
     rendered = render_quadlet_service(service, vm, inventory_root=inventory_root)
     start_units = service_start_units(service)
+    network_units = quadlet_network_units(rendered.artifacts)
     return {
         "fortress_quadlet_artifacts": [
             {"filename": artifact.filename, "path": artifact.path, "content": artifact.content}
@@ -51,6 +52,7 @@ def quadlet_deploy_vars(service, vm, inventory_root=None):
             service_data_directory_vars(directory)
             for directory in rendered.service_data_directories
         ],
+        "fortress_service_network_units": network_units,
         "fortress_service_start_units": start_units,
         "fortress_service_stop_units": list(reversed(start_units)),
         "fortress_owned_quadlet_prune_paths": [
@@ -91,6 +93,14 @@ def service_start_units(service):
     for container_name in containers:
         visit(container_name)
     return ordered
+
+
+def quadlet_network_units(artifacts):
+    return [
+        f"{artifact.filename.removesuffix('.network')}-network.service"
+        for artifact in artifacts
+        if artifact.filename.endswith(".network")
+    ]
 
 
 def fortress_container_unit(service, container_name):

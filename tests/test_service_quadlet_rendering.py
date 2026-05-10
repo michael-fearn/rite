@@ -410,6 +410,45 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
         self.assertIn("After=mnt-nas-media.mount", unit)
         self.assertIn("Volume=/mnt/nas/media/photos:/photos:ro", unit)
 
+    def test_share_backed_volume_uses_systemd_escaped_mount_unit_name(self):
+        service = {
+            "name": "demo",
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "web",
+                        "image": "docker.io/library/nginx:1.27",
+                        "volumes": [
+                            {
+                                "mount": "nfs-demo",
+                                "source": "/",
+                                "container": "/mnt/shared",
+                                "access": "read_write",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+        vm = {
+            "mounts": [
+                {
+                    "name": "nfs-demo",
+                    "dataset": "acceptance-nfs-demo",
+                    "protocol": "nfs",
+                    "mount_point": "/mnt/nfs-demo",
+                    "access": "read_write",
+                }
+            ]
+        }
+
+        unit = render_quadlet_container(service, vm, service["deploy"]["containers"][0])
+
+        self.assertIn("Requires=mnt-nfs\\x2ddemo.mount", unit)
+        self.assertIn("After=mnt-nfs\\x2ddemo.mount", unit)
+        self.assertNotIn("mnt-nfs-demo.mount", unit)
+
     def test_service_owned_volume_sources_are_relative_service_paths(self):
         service = {
             "name": "immich",

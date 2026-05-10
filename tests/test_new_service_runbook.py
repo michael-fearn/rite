@@ -66,12 +66,12 @@ class NewServiceRunbookTests(unittest.TestCase):
         self.assertEqual(
             [
                 {"bind": "127.0.0.1", "host": 8080, "container": 80, "ingress": True},
-                {"bind": "127.0.0.1", "host": 18080, "container": 8080},
+                {"bind": "127.0.0.1", "host": 18080, "container": 80},
             ],
             containers[0]["published_ports"],
         )
         self.assertIn(
-            {"service_path": "web", "container": "/usr/share/nginx/html", "access": "read_write"},
+            {"service_path": "web", "container": "/srv/fortress-demo-owned", "access": "read_write"},
             containers[0]["volumes"],
         )
         self.assertIn(
@@ -86,12 +86,13 @@ class NewServiceRunbookTests(unittest.TestCase):
         web = rendered.artifacts_by_filename["fortress-fortress-service-demo-web.container"]
         self.assertIn("NetworkAlias=web\n", web.content)
         self.assertIn("Network=fortress-group-service-demo\n", web.content)
-        self.assertIn("Requires=fortress-fortress-service-demo-postgres.service fortress-fortress-service-demo-redis.service mnt-nfs-demo.mount\n", web.content)
+        self.assertIn("Requires=fortress-fortress-service-demo-postgres.service fortress-fortress-service-demo-redis.service mnt-nfs\\x2ddemo.mount\n", web.content)
         self.assertIn("PublishPort=127.0.0.1:8080:80/tcp\n", web.content)
-        self.assertIn("PublishPort=127.0.0.1:18080:8080/tcp\n", web.content)
+        self.assertIn("PublishPort=127.0.0.1:18080:80/tcp\n", web.content)
         self.assertIn("Secret=fortress_fortress-service-demo_demo_password\n", web.content)
-        self.assertIn("Volume=/srv/services/fortress-service-demo/web:/usr/share/nginx/html:rw\n", web.content)
+        self.assertIn("Volume=/srv/services/fortress-service-demo/web:/srv/fortress-demo-owned:rw\n", web.content)
         self.assertIn("Volume=/mnt/nfs-demo:/mnt/shared:rw\n", web.content)
+        self.assertIn("Notify=false\n", web.content)
         self.assertIn("RestartSec=5\n", web.content)
 
 

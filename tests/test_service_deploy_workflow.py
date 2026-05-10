@@ -133,6 +133,7 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
     def test_service_deploy_playbook_validates_subpaths_before_starting_containers(self):
         playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
 
+        self.assertIn("become: true", playbook)
         self.assertLess(
             playbook.index("name: Validate Share-backed Volume subpaths"),
             playbook.index("name: Start Service containers"),
@@ -142,10 +143,19 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
 
         self.assertLess(
+            playbook.index("name: Ensure Podman is installed for Quadlet Services"),
+            playbook.index("name: Install Service Secrets as Podman secrets"),
+        )
+        self.assertLess(
+            playbook.index("name: Remove Service Secrets before replacement"),
+            playbook.index("name: Install Service Secrets as Podman secrets"),
+        )
+        self.assertLess(
             playbook.index("name: Install Service Secrets as Podman secrets"),
             playbook.index("name: Start Service containers"),
         )
         self.assertIn("no_log: true", playbook)
+        self.assertIn("podman secret rm", playbook)
         self.assertIn("podman secret create", playbook)
 
     def test_service_deploy_passes_rendered_artifacts_and_restart_order_to_playbook(self):
@@ -192,6 +202,10 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
                 [artifact["filename"] for artifact in extra_vars["fortress_quadlet_artifacts"]],
             )
             self.assertEqual(
+                ["fortress-group-media-network.service"],
+                extra_vars["fortress_service_network_units"],
+            )
+            self.assertEqual(
                 ["fortress-immich-postgres.service", "fortress-immich-server.service"],
                 extra_vars["fortress_service_start_units"],
             )
@@ -217,6 +231,10 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         self.assertIn("{{ fortress_service_secret_prefix }}", playbook)
         self.assertLess(
             playbook.index("name: Stop Service containers in reverse dependency order"),
+            playbook.index("name: Start Service networks before containers"),
+        )
+        self.assertLess(
+            playbook.index("name: Start Service networks before containers"),
             playbook.index("name: Start Service containers in dependency order"),
         )
         self.assertIn("systemctl start {{ item }}", deploy_workflow)

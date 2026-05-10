@@ -86,10 +86,10 @@ deploy:
           ingress: true
         - bind: 127.0.0.1
           host: 18080
-          container: 8080
+          container: 80
       volumes:
         - service_path: web
-          container: /usr/share/nginx/html
+          container: /srv/fortress-demo-owned
           access: read_write
         - mount: nfs-demo
           source: /
@@ -114,6 +114,9 @@ deploy:
 Add a validated Quadlet Fragment at `inventory/services/fortress-service-demo.quadlet.d/web.container`:
 
 ```ini
+[Container]
+Notify=false
+
 [Service]
 RestartSec=5
 ```
@@ -135,9 +138,10 @@ podman exec fortress-fortress-service-demo-web getent hosts postgres
 podman exec fortress-fortress-service-demo-web getent hosts redis
 podman exec fortress-fortress-service-demo-web test -f "$DEMO_PASSWORD_FILE"
 curl -fsS http://127.0.0.1:8080/
+curl -fsS http://127.0.0.1:18080/
 curl -fsS https://fortress-service-demo.fearn.cloud/
 ```
 
-Success signals are `active` for all three systemd units, `getent hosts` returning addresses for the `postgres` and `redis` Container Aliases, the secret file test exiting zero, the VM-local curl returning HTTP content, and the Ingress curl succeeding when Ingress is enabled.
+Success signals are `active` for all three systemd units, `getent hosts` returning addresses for the `postgres` and `redis` Container Aliases, the secret file test exiting zero, the VM-local curls returning HTTP content, and the Ingress curl succeeding when Ingress is enabled. The demo web fragment sets `Notify=false` because the nginx image does not emit a container readiness notification.
 
 Failure signals are `Failed to start fortress-fortress-service-demo-*.service`, `journalctl -u <unit>` showing container startup errors, missing Share-backed Volume paths during deploy, `getent hosts` failing for Container Aliases, or the Ingress curl failing while the VM-local curl succeeds.

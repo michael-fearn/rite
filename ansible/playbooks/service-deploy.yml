@@ -1,6 +1,7 @@
 - name: Deploy Service
   hosts: "{{ deploy_service_backend_vm }}"
   gather_facts: false
+  become: true
   tasks:
     - name: Validate Share-backed Volume subpaths
       ansible.builtin.stat:
@@ -14,9 +15,22 @@
       loop: "{{ fortress_service_volume_subpath_stats.results | default([]) }}"
       when: not item.stat.exists
 
+    - name: Ensure Podman is installed for Quadlet Services
+      ansible.builtin.apt:
+        name: podman
+        state: present
+        update_cache: true
+
+    - name: Remove Service Secrets before replacement
+      ansible.builtin.command:
+        cmd: "podman secret rm {{ item.podman_name }}"
+      loop: "{{ fortress_service_secrets | default([]) }}"
+      failed_when: false
+      no_log: true
+
     - name: Install Service Secrets as Podman secrets
       ansible.builtin.command:
-        cmd: "podman secret create --replace {{ item.podman_name }} -"
+        cmd: "podman secret create {{ item.podman_name }} -"
         stdin: "{{ lookup('pipe', 'sops --decrypt --extract ' ~ item.sops_extract | quote ~ ' ' ~ fortress_service_sops_file | quote) }}"
       loop: "{{ fortress_service_secrets | default([]) }}"
       no_log: true
@@ -89,6 +103,11 @@
       loop: "{{ fortress_service_stop_units }}"
       failed_when: false
       changed_when: true
+
+    - name: Start Service networks before containers
+      ansible.builtin.command:
+        cmd: "systemctl start {{ item }}"
+      loop: "{{ fortress_service_network_units | default([]) }}"
 
     - name: Start Service containers in dependency order
       ansible.builtin.include_tasks: ../tasks/service-start-unit.yml

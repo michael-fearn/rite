@@ -3,7 +3,7 @@ description: throwaway wintermute lifecycle demo
 placement:
   host: wintermute
 source:
-  template: debian-12-base
+  template: debian-13-base
 hardware:
   cores: 1
   memory: 1024
