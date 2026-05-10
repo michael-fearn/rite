@@ -1,0 +1,24 @@
+name: debian-13-base
+vmid: 9002
+source:
+  url: https://cloud.debian.org/images/cloud/trixie/20260509-2473/debian-13-genericcloud-amd64-20260509-2473.qcow2
+  checksum:
+    algorithm: sha512
+    value: 2d921fce234cfa145c7d819d3ef7b2dba2fe84ac436fb2fff78ade3424b52f6c42f85e8fc97e253c77884c762caa2e52c6914946f75d8ebb231320b0a1f42cc4
+customize:
+  packages:
+    - qemu-guest-agent
+    - sudo
+  run_commands:
+    - systemctl enable qemu-guest-agent
+hardware:
+  cores: 2
+  memory: 2048
+  disk_storage: local-lvm
+  cloud_init_storage: local-lvm
+  bios: ovmf
+  machine: q35
+  scsi_controller: virtio-scsi-pci
+  network_model: virtio
+  agent_enabled: true
+  serial_console: true

@@ -35,7 +35,7 @@ A fleet-level declaration of the reusable VMIDs, hardware, storage, and IP alloc
 _Avoid_: hard-coded test constants, fixture inventory.
 
 **Template**:
-A stopped Proxmox VM marked `template: 1` with a cloud-init drive, declared in `vm-templates/<name>.yaml`. Used as the clone source for new VMs. Lives on a specific Host.
+A stopped Proxmox VM marked `template: 1` with a cloud-init drive, declared in `inventory/templates/<name>.yaml`. Used as the clone source for new VMs. Lives on a specific Host.
 _Avoid_: image (reserve for the upstream Cloud Image).
 
 **Cloud Image**:
@@ -81,6 +81,10 @@ _Avoid_: object, record.
 **Inventory**:
 The set of per-entity YAML files at `inventory/{hosts,vms,services,datasets,nas}/`. Source of truth for all declared state.
 _Avoid_: catalog, registry.
+
+**Infrastructure VLAN**:
+VLAN 40 (`10.40.0.0/24`), the routed network for static infrastructure Services such as the Ingress.
+_Avoid_: management network, apps network.
 
 ### Operator and ceremony
 
@@ -165,7 +169,7 @@ The escape-hatch substrate: an apt package plus a systemd unit, configured by An
 _Avoid_: bare-metal (the VM is still a VM); package install.
 
 **Ingress**:
-The single Caddy VM that terminates TLS and reverse-proxies all `*.fearn.cloud` traffic to backing Services. There is exactly one.
+The single VM named `ingress`, placed on the `straylight` Host, that terminates TLS and reverse-proxies all `*.fearn.cloud` traffic to backing Services.
 _Avoid_: edge, gateway, proxy (reserve "proxy" for the verb).
 
 **Exposure**:
@@ -264,6 +268,7 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 
 - A **Host** runs zero or more **VMs** and holds zero or more **Templates**.
 - A **VM** is provisioned from one **Template** and runs zero or more **Services**.
+- The **Ingress** VM is attached to the **Infrastructure VLAN** at `10.40.0.11/24`.
 - A **Dataset** is declared in `inventory/datasets/<dataset>.yaml`.
 - A **Service Group** contains one or more **Services** on the same **VM**.
 - A **Service Group** name is globally unique within the **Inventory**.

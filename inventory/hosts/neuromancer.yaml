@@ -2,8 +2,8 @@ proxmox:
   pve_node_name: neuromancer
   endpoint: http://10.10.0.12:8006
   # endpoint: https://neuromancer.fearn.cloud:8006
-  templates: []
-    # - debian-13-base
+  templates:
+    - debian-13-base
   users:
     - name: tofu@pve
       roles: [PVEVMAdmin, PVEDatastoreUser]

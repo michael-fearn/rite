@@ -4,6 +4,7 @@ proxmox:
   # endpoint: https://wintermute.fearn.cloud:8006
   templates:
     - debian-12-base
+    - debian-13-base
   users:
     - name: tofu@pve
       roles: [PVEVMAdmin, PVEDatastoreUser]
