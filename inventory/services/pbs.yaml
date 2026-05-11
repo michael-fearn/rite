@@ -1,0 +1,16 @@
+name: pbs
+backend:
+  vm: pbs-vm
+  port: 8007
+ingress:
+  enabled: false
+deploy:
+  type: native
+  package: proxmox-backup-server
+  apt_repo: proxmox_backup_no_subscription
+  service_name: proxmox-backup-proxy
+  config_files:
+    - template: datastore.cfg.j2
+      dest: /etc/proxmox-backup/datastore.cfg
+      mode: "0640"
+      restart_on_change: true

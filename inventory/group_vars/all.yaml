@@ -19,3 +19,6 @@ apt_repos:
   caddy_official:
     url: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
     repo: deb [trusted=yes] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+  proxmox_backup_no_subscription:
+    url: http://download.proxmox.com/debian/pbs
+    repo: deb [trusted=yes] http://download.proxmox.com/debian/pbs trixie pbs-no-subscription

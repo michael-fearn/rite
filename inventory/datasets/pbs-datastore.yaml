@@ -1,0 +1,7 @@
+name: pbs-datastore
+nas: truenas
+path: /mnt/tank/pbs-datastore
+lifecycle: adopted
+owner:
+  uid: 34
+  gid: 34

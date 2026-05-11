@@ -1,0 +1,77 @@
+name: identity
+hostname: auth.fearn.cloud
+service_group: identity
+service_data_owner:
+  uid: 1000
+  gid: 1000
+backend:
+  vm: identity-vm
+  port: 9000
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: postgres
+      image: docker.io/library/postgres:16
+      env:
+        POSTGRES_DB: authentik
+        POSTGRES_USER: authentik
+      secrets:
+        - secret: secrets.postgres_password
+          env: POSTGRES_PASSWORD_FILE
+      volumes:
+        - service_path: postgres
+          container: /var/lib/postgresql/data
+          access: read_write
+    - name: redis
+      image: docker.io/library/redis:7
+    - name: server
+      image: ghcr.io/goauthentik/server:2025.4.1
+      depends_on: [postgres, redis]
+      published_ports:
+        - bind: 0.0.0.0
+          host: 9000
+          container: 9000
+          ingress: true
+      env:
+        AUTHENTIK_POSTGRESQL__HOST: postgres
+        AUTHENTIK_POSTGRESQL__USER: authentik
+        AUTHENTIK_POSTGRESQL__NAME: authentik
+        AUTHENTIK_REDIS__HOST: redis
+      secrets:
+        - secret: secrets.secret_key
+          env: AUTHENTIK_SECRET_KEY_FILE
+        - secret: secrets.postgres_password
+          env: AUTHENTIK_POSTGRESQL__PASSWORD_FILE
+      volumes:
+        - service_path: media
+          container: /media
+          access: read_write
+        - service_path: templates
+          container: /templates
+          access: read_write
+    - name: worker
+      image: ghcr.io/goauthentik/server:2025.4.1
+      depends_on: [postgres, redis]
+      env:
+        AUTHENTIK_POSTGRESQL__HOST: postgres
+        AUTHENTIK_POSTGRESQL__USER: authentik
+        AUTHENTIK_POSTGRESQL__NAME: authentik
+        AUTHENTIK_REDIS__HOST: redis
+      secrets:
+        - secret: secrets.secret_key
+          env: AUTHENTIK_SECRET_KEY_FILE
+        - secret: secrets.postgres_password
+          env: AUTHENTIK_POSTGRESQL__PASSWORD_FILE
+      volumes:
+        - service_path: media
+          container: /media
+          access: read_write
+        - service_path: templates
+          container: /templates
+          access: read_write

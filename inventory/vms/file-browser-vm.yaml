@@ -1,0 +1,28 @@
+vmid: 1105
+description: Apps VLAN Trusted-only personal file browser VM
+placement:
+  host: neuromancer
+source:
+  template: debian-13-base
+hardware:
+  cores: 1
+  memory: 1024
+  disks:
+    - storage: local-lvm
+      size: 16G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 50
+      address: 10.50.0.15/24
+      gateway: 10.50.0.1
+cloud_init:
+  hostname: file-browser-vm
+mounts:
+  - name: personal-media
+    dataset: personal-media
+    protocol: nfs
+    mount_point: /mnt/nas/personal-media
+    access: read_write
+backup:
+  enabled: true

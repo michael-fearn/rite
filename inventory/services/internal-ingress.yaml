@@ -1,14 +1,9 @@
-name: fortress-native-demo
-hostname: fortress-native-demo.fearn.cloud
+name: internal-ingress
 backend:
-  vm: wintermute-demo
-  port: 2080
+  vm: internal-ingress-vm
+  port: 443
 ingress:
-  enabled: true
-  exposure: lan_only
-  tls: letsencrypt_dns
-  auth:
-    type: none
+  enabled: false
 deploy:
   type: native
   package: caddy

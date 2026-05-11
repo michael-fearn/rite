@@ -1,0 +1,68 @@
+name: observability
+hostname: grafana.fearn.cloud
+service_group: observability
+service_data_owner:
+  uid: 1000
+  gid: 1000
+backend:
+  vm: observability-vm
+  port: 3000
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: prometheus
+      image: docker.io/prom/prometheus:v3.4.0
+      published_ports:
+        - bind: 0.0.0.0
+          host: 9090
+          container: 9090
+      volumes:
+        - service_path: prometheus
+          container: /prometheus
+          access: read_write
+        - service_path: prometheus-config
+          container: /etc/prometheus
+          access: read_write
+    - name: alertmanager
+      image: docker.io/prom/alertmanager:v0.28.1
+      published_ports:
+        - bind: 0.0.0.0
+          host: 9093
+          container: 9093
+      volumes:
+        - service_path: alertmanager
+          container: /alertmanager
+          access: read_write
+    - name: grafana
+      image: docker.io/grafana/grafana:12.0.0
+      published_ports:
+        - bind: 0.0.0.0
+          host: 3000
+          container: 3000
+          ingress: true
+      volumes:
+        - service_path: grafana
+          container: /var/lib/grafana
+          access: read_write
+    - name: loki
+      image: docker.io/grafana/loki:3.5.0
+      published_ports:
+        - bind: 0.0.0.0
+          host: 3100
+          container: 3100
+      volumes:
+        - service_path: loki
+          container: /loki
+          access: read_write
+    - name: blackbox
+      image: docker.io/prom/blackbox-exporter:v0.26.0
+      published_ports:
+        - bind: 0.0.0.0
+          host: 9115
+          container: 9115

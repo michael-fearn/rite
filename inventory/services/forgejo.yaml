@@ -1,0 +1,38 @@
+name: forgejo
+hostname: forgejo.fearn.cloud
+service_data_owner:
+  uid: 1000
+  gid: 1000
+backend:
+  vm: forgejo-vm
+  port: 3000
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: server
+      image: codeberg.org/forgejo/forgejo:11.0.1
+      published_ports:
+        - bind: 0.0.0.0
+          host: 3000
+          container: 3000
+          ingress: true
+        - bind: 0.0.0.0
+          host: 2222
+          container: 22
+      env:
+        USER_UID: 1000
+        USER_GID: 1000
+        FORGEJO__server__DOMAIN: forgejo.fearn.cloud
+        FORGEJO__server__ROOT_URL: https://forgejo.fearn.cloud/
+        FORGEJO__server__SSH_DOMAIN: forgejo.fearn.cloud
+        FORGEJO__server__SSH_PORT: 2222
+      volumes:
+        - service_path: data
+          container: /data
+          access: read_write

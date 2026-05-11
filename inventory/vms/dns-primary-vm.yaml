@@ -1,0 +1,22 @@
+vmid: 1001
+description: Primary Infrastructure VLAN DNS resolver
+placement:
+  host: straylight
+source:
+  template: debian-13-base
+hardware:
+  cores: 1
+  memory: 1024
+  disks:
+    - storage: local-lvm
+      size: 8G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 40
+      address: 10.40.0.11/24
+      gateway: 10.40.0.1
+cloud_init:
+  hostname: dns-primary-vm
+backup:
+  enabled: true

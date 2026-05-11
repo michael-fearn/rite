@@ -1,0 +1,34 @@
+name: headscale
+hostname: headscale.fearn.cloud
+service_data_owner:
+  uid: 1000
+  gid: 1000
+backend:
+  vm: headscale-vm
+  port: 8080
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: server
+      image: docker.io/headscale/headscale:0.26.1
+      published_ports:
+        - bind: 0.0.0.0
+          host: 8080
+          container: 8080
+          ingress: true
+      env:
+        HEADSCALE_LISTEN_ADDR: 0.0.0.0:8080
+        HEADSCALE_SERVER_URL: https://headscale.fearn.cloud
+      volumes:
+        - service_path: config
+          container: /etc/headscale
+          access: read_write
+        - service_path: data
+          container: /var/lib/headscale
+          access: read_write

@@ -1,0 +1,22 @@
+vmid: 1006
+description: Infrastructure VLAN internal ingress VM
+placement:
+  host: straylight
+source:
+  template: debian-13-base
+hardware:
+  cores: 1
+  memory: 1024
+  disks:
+    - storage: local-lvm
+      size: 16G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 40
+      address: 10.40.0.16/24
+      gateway: 10.40.0.1
+cloud_init:
+  hostname: internal-ingress-vm
+backup:
+  enabled: true

@@ -1,0 +1,22 @@
+vmid: 1002
+description: Infrastructure VLAN Forgejo VM
+placement:
+  host: straylight
+source:
+  template: debian-13-base
+hardware:
+  cores: 2
+  memory: 2048
+  disks:
+    - storage: local-lvm
+      size: 32G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 40
+      address: 10.40.0.12/24
+      gateway: 10.40.0.1
+cloud_init:
+  hostname: forgejo-vm
+backup:
+  enabled: true

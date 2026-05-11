@@ -1,0 +1,7 @@
+name: personal-media
+nas: truenas
+path: /mnt/tank/personal-media
+lifecycle: adopted
+owner:
+  uid: 1000
+  gid: 1000

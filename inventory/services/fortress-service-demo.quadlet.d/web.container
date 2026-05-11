@@ -1,5 +1,0 @@
-[Container]
-Notify=false
-
-[Service]
-RestartSec=5

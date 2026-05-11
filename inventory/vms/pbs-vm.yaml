@@ -1,0 +1,28 @@
+vmid: 1003
+description: Infrastructure VLAN Proxmox Backup Server VM
+placement:
+  host: straylight
+source:
+  template: debian-13-base
+hardware:
+  cores: 2
+  memory: 4096
+  disks:
+    - storage: local-lvm
+      size: 32G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 40
+      address: 10.40.0.13/24
+      gateway: 10.40.0.1
+cloud_init:
+  hostname: pbs-vm
+mounts:
+  - name: pbs-datastore
+    dataset: pbs-datastore
+    protocol: nfs
+    mount_point: /mnt/nas/pbs-datastore
+    access: read_write
+backup:
+  enabled: false
