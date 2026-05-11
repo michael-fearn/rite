@@ -1,7 +1,6 @@
 import unittest
 from pathlib import Path
 
-from fortress_inventory.simple_yaml import load_yaml
 from fortress_services.quadlet import render_quadlet_service
 
 
@@ -45,7 +44,60 @@ class NewServiceRunbookTests(unittest.TestCase):
                 self.assertIn(phrase, content)
 
     def test_acceptance_demo_service_shape_is_renderable(self):
-        service = load_yaml(REPO_ROOT / "inventory" / "acceptance" / "service-demo.yaml")
+        service = {
+            "name": "fortress-service-demo",
+            "hostname": "fortress-service-demo.fearn.cloud",
+            "service_group": "service-demo",
+            "service_data_owner": {"uid": 1000, "gid": 1000},
+            "backend": {"vm": "wintermute-demo", "port": 8080},
+            "ingress": {
+                "enabled": True,
+                "exposure": "lan_only",
+                "tls": "letsencrypt_dns",
+                "auth": {"type": "none"},
+            },
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "web",
+                        "image": "docker.io/library/nginx:1.27",
+                        "depends_on": ["postgres", "redis"],
+                        "published_ports": [
+                            {"bind": "127.0.0.1", "host": 8080, "container": 80, "ingress": True},
+                            {"bind": "127.0.0.1", "host": 18080, "container": 80},
+                        ],
+                        "volumes": [
+                            {
+                                "service_path": "web",
+                                "container": "/srv/fortress-demo-owned",
+                                "access": "read_write",
+                            },
+                            {
+                                "mount": "nfs-demo",
+                                "source": "/",
+                                "container": "/mnt/shared",
+                                "access": "read_write",
+                            },
+                        ],
+                        "secrets": [{"secret": "secrets.demo_password", "env": "DEMO_PASSWORD_FILE"}],
+                    },
+                    {
+                        "name": "postgres",
+                        "image": "docker.io/library/postgres:16",
+                        "secrets": [{"secret": "secrets.demo_password", "env": "POSTGRES_PASSWORD_FILE"}],
+                        "volumes": [
+                            {
+                                "service_path": "postgres",
+                                "container": "/var/lib/postgresql/data",
+                                "access": "read_write",
+                            },
+                        ],
+                    },
+                    {"name": "redis", "image": "docker.io/library/redis:7"},
+                ],
+            },
+        }
         vm = {
             "mounts": [
                 {

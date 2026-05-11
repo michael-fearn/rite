@@ -9,7 +9,7 @@ Fortress keeps one root OpenTofu module under `tofu/`. That root module is the f
 Run `scripts/tofu-generate` after changing Host inventory. The command writes ignored build output:
 
 - `tofu/generated-providers.tf` contains one literal `provider "proxmox"` alias per Host and one sensitive `pve_token_<host>` variable per Host.
-- `tofu/generated-vm-partitions.tf` contains one literal per-Host VM partition module, filtering decoded VMs by `placement.host`.
+- `tofu/generated-vm-partitions.tf` contains one literal per-Host VM partition module. Fleet-wide generation filters decoded VMs by `placement.host`; selected-VM generation passes only the selected VM into its Host partition.
 
 The generated files are not committed. They are reproducible from Inventory and are ignored alongside `.terraform/`, lock files, and local state.
 
@@ -17,4 +17,4 @@ OpenTofu provider aliases must be literal at configuration load time. Fortress t
 
 The current `tofu/modules/vm-partition` module creates Proxmox VM resources from declared VM YAML. It clones the declared Template, reads hardware, disk, network, placement, and cloud-init fields from Inventory, uploads per-VM cloud-init userdata, and passes the plaintext VM SSH public key written by Prepare. If that public key is missing, the plan fails with an instruction to run Prepare first.
 
-Use `-var selected_vm=<vm>` through `scripts/vm-up` and `scripts/vm-destroy` so the wrapper can decrypt only the selected VM's Host token. Those workflows also pass resource targets for the selected VM's cloud-init snippet and VM resources so sibling VMs remain in configuration but are not planned for mutation. Omitting `selected_vm` leaves the module shaped for whole-fleet reconciliation later, still with one root module and one local fleet state file.
+Use `-var selected_vm=<vm>` through `scripts/vm-up` and `scripts/vm-destroy` so the wrapper can decrypt only the selected VM's Host token and generate only that VM inside the Host partition. Those workflows also pass resource targets for the selected VM's cloud-init snippet and VM resources. Omitting `selected_vm` leaves the module shaped for whole-fleet reconciliation later, still with one root module and one local fleet state file.

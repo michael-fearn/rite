@@ -39,7 +39,7 @@ Observed ACL output grants roles to the user only:
 ```json
 [
   {"path":"/","propagate":1,"roleid":"PVEVMAdmin","type":"user","ugid":"tofu@pve"},
-  {"path":"/","propagate":1,"roleid":"PVEDatastoreUser","type":"user","ugid":"tofu@pve"}
+  {"path":"/","propagate":1,"roleid":"PVEDatastoreAdmin, PVESDNAdmin","type":"user","ugid":"tofu@pve"}
 ]
 ```
 
@@ -64,10 +64,10 @@ The declared PVE API token principal should have effective permissions matching 
 proxmox:
   users:
     - name: tofu@pve
-      roles: [PVEVMAdmin, PVEDatastoreUser]
+      roles: [PVEVMAdmin, PVEDatastoreAdmin, PVESDNAdmin]
       tokens:
         - id: tofu
-          roles: [PVEVMAdmin, PVEDatastoreUser]
+          roles: [PVEVMAdmin, PVEDatastoreAdmin, PVESDNAdmin]
 ```
 
 After Host Configure, `pveum user token permissions tofu@pve tofu --output-format json` should return non-empty privileges sufficient for OpenTofu VM lifecycle operations.
@@ -87,7 +87,7 @@ Update `ansible/roles/proxmox_users/tasks/main.yml` so declared token roles are 
 Use one command per declared token, with that token's roles comma-joined. The Proxmox command shape is:
 
 ```sh
-pveum acl modify / --tokens tofu@pve!tofu --roles PVEVMAdmin,PVEDatastoreUser
+pveum acl modify / --tokens tofu@pve!tofu --roles PVEVMAdmin,PVEDatastoreAdmin, PVESDNAdmin
 ```
 
 The implementation should derive `tofu@pve!tofu` from `user.name` and `token.id`, and should use `token.roles` rather than assuming the token always inherits `user.roles`. Apply token ACLs at the root path only for this issue.
@@ -109,12 +109,12 @@ For idempotency, follow the existing `proxmox_users` ACL style: declare the desi
 
 ## Acceptance Criteria
 
-- [ ] `proxmox_users` applies ACLs for declared PVE tokens when tokens have `roles`.
-- [ ] Token ACLs use the full PVE API token principal, e.g. `tofu@pve!tofu`, derived from `user.name` and `token.id`.
-- [ ] Token ACL application is idempotent in Ansible change reporting; a second `just host-configure ... tags=proxmox_users` run is a no-op.
-- [ ] Token ACL application uses `token.roles`, not `user.roles`, when building token ACL commands.
-- [ ] Multiple token roles are comma-joined into one token ACL command.
-- [ ] Parent-user ACL application from `user.roles` is preserved.
-- [ ] Regression tests cover token ACL command generation for `tofu@pve!tofu`, including `--tokens` and comma-joined roles.
+- [x] `proxmox_users` applies ACLs for declared PVE tokens when tokens have `roles`.
+- [x] Token ACLs use the full PVE API token principal, e.g. `tofu@pve!tofu`, derived from `user.name` and `token.id`.
+- [x] Token ACL application is idempotent in Ansible change reporting; a second `just host-configure ... tags=proxmox_users` run is a no-op.
+- [x] Token ACL application uses `token.roles`, not `user.roles`, when building token ACL commands.
+- [x] Multiple token roles are comma-joined into one token ACL command.
+- [x] Parent-user ACL application from `user.roles` is preserved.
+- [x] Regression tests cover token ACL command generation for `tofu@pve!tofu`, including `--tokens` and comma-joined roles.
 - [ ] `pveum user token permissions tofu@pve tofu --output-format json` returns non-empty effective privileges after Host Configure.
-- [ ] Existing user ACL behavior continues to work.
+- [x] Existing user ACL behavior continues to work.

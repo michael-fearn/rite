@@ -6,10 +6,10 @@ proxmox:
     - debian-13-base
   users:
     - name: tofu@pve
-      roles: [PVEVMAdmin, PVEDatastoreUser]
+      roles: [PVEVMAdmin, PVEDatastoreAdmin, PVESDNAdmin]
       tokens:
         - id: tofu
-          roles: [PVEVMAdmin, PVEDatastoreUser]
+          roles: [PVEVMAdmin, PVEDatastoreAdmin, PVESDNAdmin]
 hardware:
   cpu: i5-6500T
   cores: 4

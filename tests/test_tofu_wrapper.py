@@ -88,6 +88,38 @@ class TofuWrapperTests(unittest.TestCase):
             self.assertIn("tofu-env TF_VAR_pve_ssh_private_key_wintermute=PRIVATE KEY", calls)
             self.assertNotIn("TF_VAR_pve_token_neuromancer", calls)
 
+    def test_selected_vm_wrap_generates_partition_for_only_the_selected_vm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._wrapper_fixture(tmp)
+            (root / "inventory" / "vms" / "unprepared-sibling.yaml").write_text(
+                "vmid: 102\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 2\n"
+                "  memory: 4096\n"
+                "cloud_init:\n"
+                "  hostname: unprepared-sibling\n"
+            )
+            env = self._fake_tools(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "tofu-wrap"), "plan", "-var", "selected_vm=media01"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("tofu plan -var selected_vm=media01", calls_log.read_text())
+            partitions = (root / "tofu" / "generated-vm-partitions.tf").read_text()
+            self.assertIn('if vm_name == "media01"', partitions)
+            self.assertNotIn('if vm.placement.host == "wintermute"', partitions)
+
     def test_wrap_fails_before_tofu_when_tofu_token_value_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, calls_log = self._wrapper_fixture(tmp)

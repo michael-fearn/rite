@@ -110,6 +110,35 @@ class TofuGenerationTests(unittest.TestCase):
             self.assertIn('module "vms_wintermute"', partitions)
             self.assertNotIn("vms_neuromancer", partitions)
 
+    def test_selected_vm_generation_passes_only_the_selected_vm_to_the_host_partition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "vms" / "unprepared-sibling.yaml").write_text(
+                "vmid: 102\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 2\n"
+                "  memory: 4096\n"
+                "cloud_init:\n"
+                "  hostname: unprepared-sibling\n"
+            )
+
+            subprocess.run(
+                [str(REPO_ROOT / "scripts" / "tofu-generate"), str(root), "--selected-vm", "media01"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            partitions = (root / "tofu" / "generated-vm-partitions.tf").read_text()
+            self.assertIn('if vm_name == "media01"', partitions)
+            self.assertNotIn('if vm.placement.host == "wintermute"', partitions)
+
     def test_root_tofu_module_decodes_vm_inventory_yaml(self):
         root_module = (REPO_ROOT / "tofu" / "main.tf").read_text()
 

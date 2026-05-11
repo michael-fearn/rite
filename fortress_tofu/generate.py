@@ -1,4 +1,5 @@
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ def generate_tofu(root, selected_vm=None):
     tofu_root = root / "tofu"
     tofu_root.mkdir(exist_ok=True)
     (tofu_root / "generated-providers.tf").write_text(render_provider_hcl(hosts))
-    (tofu_root / "generated-vm-partitions.tf").write_text(render_vm_partitions_hcl(hosts))
+    (tofu_root / "generated-vm-partitions.tf").write_text(render_vm_partitions_hcl(hosts, selected_vm))
 
 
 class TofuGenerationError(Exception):
@@ -95,10 +96,14 @@ def render_provider_hcl(hosts):
     return "\n".join(blocks)
 
 
-def render_vm_partitions_hcl(hosts):
+def render_vm_partitions_hcl(hosts, selected_vm=None):
     blocks = [HEADER]
     for host_name, host in sorted(hosts.items()):
         alias = hcl_identifier(host_name)
+        if selected_vm:
+            vm_filter = f"vm_name == {json.dumps(selected_vm)}"
+        else:
+            vm_filter = f'vm.placement.host == "{host_name}"'
         blocks.append(
             "\n".join(
                 [
@@ -114,7 +119,7 @@ def render_vm_partitions_hcl(hosts):
                     "  admin_user    = local.globals.vm_admin_user",
                     "  templates     = local.templates",
                     "  vms = {",
-                    f'    for vm_name, vm in local.vms : vm_name => vm if vm.placement.host == "{host_name}"',
+                    f"    for vm_name, vm in local.vms : vm_name => vm if {vm_filter}",
                     "  }",
                     "}",
                     "",

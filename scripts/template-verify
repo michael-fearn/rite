@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fortress_inventory.model import load_inventory_tree  # noqa: E402
+from fortress_inventory.simple_yaml import load_yaml  # noqa: E402
 
 
 VM_NAME = "tmp-template-verify"
@@ -65,6 +66,10 @@ class HostResult:
 
 
 def verify_host(repo_root, host_name, template_name, keep_on_fail):
+    stale_cleanup = clean_stale_generated_artifacts(repo_root, keep_on_fail)
+    if stale_cleanup is not None:
+        return stale_cleanup
+
     generate = run_phase(
         "generation/preflight",
         [str(repo_root / "scripts" / "template-verify-generate"), host_name, template_name],
@@ -129,6 +134,50 @@ def failed_after_generation(repo_root, phase, result, keep_on_fail):
 
 def cleanup_generated_vm(repo_root):
     return run_phase("cleanup", [str(repo_root / "scripts" / "vm-destroy"), VM_NAME, "--delete-vm-yaml"])
+
+
+def clean_stale_generated_artifacts(repo_root, keep_on_fail):
+    vm_yaml = repo_root / "inventory" / "vms" / f"{VM_NAME}.yaml"
+    vm_sops = repo_root / "inventory" / "vms" / f"{VM_NAME}.sops.yaml"
+    if not vm_yaml.exists() and not vm_sops.exists():
+        return None
+
+    if keep_on_fail:
+        return HostResult(
+            "failed",
+            "existing Template Verification VM artifacts were preserved for inspection; "
+            f"run scripts/vm-destroy {VM_NAME} --delete-vm-yaml before starting a new preserved run",
+        )
+
+    if vm_yaml.exists():
+        if not is_generated_template_verification_vm(vm_yaml):
+            return HostResult(
+                "failed",
+                f"{vm_yaml} already exists and is not clearly generated for Template Verification; refusing to remove it",
+            )
+        cleanup = cleanup_generated_vm(repo_root)
+        if cleanup.returncode != 0:
+            return HostResult("failed", phase_message("stale artifact cleanup", cleanup))
+        return None
+
+    try:
+        vm_sops.unlink()
+    except OSError as error:
+        return HostResult("failed", f"stale artifact cleanup failed: failed to delete {vm_sops}: {error}")
+    return None
+
+
+def is_generated_template_verification_vm(path):
+    try:
+        vm = load_yaml(path)
+    except (OSError, ValueError):
+        return False
+    lifecycle = vm.get("lifecycle", {}) if isinstance(vm, dict) else {}
+    return (
+        vm.get("description") == "Generated Template Verification VM. Do not edit by hand."
+        and lifecycle.get("purpose") == "template-verification"
+        and lifecycle.get("generated") is True
+    )
 
 
 def run_phase(_phase, command, cwd=None, input_text=None):

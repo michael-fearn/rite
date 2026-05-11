@@ -134,6 +134,95 @@ class TemplateVerifyOrchestrationWorkflowTests(unittest.TestCase):
             self.assertIn("verification failed on wintermute", result.stderr)
             self.assertIn("vm-destroy tmp-template-verify --delete-vm-yaml", calls_log.read_text())
 
+    def test_default_run_cleans_stale_generated_artifacts_before_generation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._fixture(tmp)
+            vm_yaml = root / "inventory" / "vms" / "tmp-template-verify.yaml"
+            vm_sops = root / "inventory" / "vms" / "tmp-template-verify.sops.yaml"
+            vm_yaml.write_text(
+                "description: Generated Template Verification VM. Do not edit by hand.\n"
+                "lifecycle:\n"
+                "  kind: operational\n"
+                "  purpose: template-verification\n"
+                "  generated: true\n"
+            )
+            vm_sops.write_text("encrypted generated ssh material\n")
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "template-verify"), "host=wintermute", "template=debian-13-base"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [
+                    "vm-destroy tmp-template-verify --delete-vm-yaml",
+                    "template-verify-generate wintermute debian-13-base",
+                    "vm-up tmp-template-verify",
+                    "decrypt-keys inventory/vms/tmp-template-verify.sops.yaml -- ansible-playbook ansible/playbooks/template-verify.yml -i inventory/fortress.yaml --limit tmp-template-verify",
+                    "ansible-playbook ansible/playbooks/template-verify.yml -i inventory/fortress.yaml --limit tmp-template-verify",
+                    "vm-destroy tmp-template-verify --delete-vm-yaml",
+                ],
+                calls_log.read_text().splitlines(),
+            )
+
+    def test_default_run_cleans_stale_generated_sibling_sops_file_before_generation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._fixture(tmp)
+            (root / "inventory" / "vms" / "tmp-template-verify.sops.yaml").write_text("encrypted generated ssh material\n")
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "template-verify"), "host=wintermute", "template=debian-13-base"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [
+                    "template-verify-generate wintermute debian-13-base",
+                    "vm-up tmp-template-verify",
+                    "decrypt-keys inventory/vms/tmp-template-verify.sops.yaml -- ansible-playbook ansible/playbooks/template-verify.yml -i inventory/fortress.yaml --limit tmp-template-verify",
+                    "ansible-playbook ansible/playbooks/template-verify.yml -i inventory/fortress.yaml --limit tmp-template-verify",
+                    "vm-destroy tmp-template-verify --delete-vm-yaml",
+                ],
+                calls_log.read_text().splitlines(),
+            )
+
+    def test_default_run_refuses_to_clean_ambiguous_template_verify_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._fixture(tmp)
+            vm_yaml = root / "inventory" / "vms" / "tmp-template-verify.yaml"
+            vm_yaml.write_text(
+                "description: operator managed VM with colliding name\n"
+                "lifecycle:\n"
+                "  kind: operational\n"
+            )
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "template-verify"), "host=wintermute", "template=debian-13-base"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("not clearly generated for Template Verification", result.stderr)
+            self.assertFalse(calls_log.exists())
+            self.assertTrue(vm_yaml.exists())
+
     def test_verification_failure_with_keep_on_fail_preserves_generated_vm(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, calls_log = self._fixture(tmp)
@@ -157,6 +246,42 @@ class TemplateVerifyOrchestrationWorkflowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("preserved Template Verification VM for inspection", result.stderr)
             self.assertNotIn("vm-destroy", calls_log.read_text())
+
+    def test_keep_on_fail_run_preserves_existing_generated_artifacts_with_recovery_instruction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._fixture(tmp)
+            vm_yaml = root / "inventory" / "vms" / "tmp-template-verify.yaml"
+            vm_sops = root / "inventory" / "vms" / "tmp-template-verify.sops.yaml"
+            vm_yaml.write_text(
+                "description: Generated Template Verification VM. Do not edit by hand.\n"
+                "lifecycle:\n"
+                "  kind: operational\n"
+                "  purpose: template-verification\n"
+                "  generated: true\n"
+            )
+            vm_sops.write_text("encrypted generated ssh material\n")
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "template-verify"),
+                    "host=wintermute",
+                    "template=debian-13-base",
+                    "keep_on_fail=true",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("preserved for inspection", result.stderr)
+            self.assertIn("scripts/vm-destroy tmp-template-verify --delete-vm-yaml", result.stderr)
+            self.assertFalse(calls_log.exists())
+            self.assertTrue(vm_yaml.exists())
+            self.assertTrue(vm_sops.exists())
 
     def test_failed_generate_and_failed_provision_are_reported_with_useful_phase_messages(self):
         scenarios = {
@@ -232,6 +357,9 @@ class TemplateVerifyOrchestrationWorkflowTests(unittest.TestCase):
                 "#!/usr/bin/env bash\n"
                 "printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$CALLS_LOG\"\n"
                 "if [ \"$(basename \"$0\")\" = template-verify-generate ]; then printf '%s\\n' \"$1\" > \"$FORTRESS_ROOT/current-template-verify-host\"; fi\n"
+                "if [ \"$(basename \"$0\")\" = template-verify-generate ] && [ -e \"$FORTRESS_ROOT/inventory/vms/tmp-template-verify.yaml\" ]; then printf 'stale generated inventory blocks generation\\n' >&2; exit 1; fi\n"
+                "if [ \"$(basename \"$0\")\" = template-verify-generate ] && [ -e \"$FORTRESS_ROOT/inventory/vms/tmp-template-verify.sops.yaml\" ]; then printf 'stale generated sops blocks generation\\n' >&2; exit 1; fi\n"
+                "if [ \"$(basename \"$0\")\" = vm-destroy ]; then rm -f \"$FORTRESS_ROOT/inventory/vms/tmp-template-verify.yaml\" \"$FORTRESS_ROOT/inventory/vms/tmp-template-verify.sops.yaml\"; fi\n"
                 "if [ \"$FORTRESS_FAIL_PHASE\" = \"$(basename \"$0\")\" ]; then printf '%s failed intentionally\\n' \"$(basename \"$0\")\" >&2; exit 42; fi\n"
                 f"{extra}\n"
             )
