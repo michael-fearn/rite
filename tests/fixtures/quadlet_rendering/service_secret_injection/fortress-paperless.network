@@ -1,2 +1,5 @@
 [Network]
 NetworkName=fortress-paperless
+
+[Install]
+WantedBy=multi-user.target

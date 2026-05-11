@@ -1,2 +1,5 @@
 [Network]
 NetworkName=fortress-group-media
+
+[Install]
+WantedBy=multi-user.target

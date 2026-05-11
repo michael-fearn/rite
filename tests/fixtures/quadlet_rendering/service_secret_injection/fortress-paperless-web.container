@@ -9,3 +9,6 @@ NetworkAlias=web
 Environment=PAPERLESS_URL=https://paperless.fearn.cloud
 Secret=fortress_paperless_admin_password
 Environment=PAPERLESS_ADMIN_PASSWORD_FILE=/run/secrets/fortress_paperless_admin_password
+
+[Install]
+WantedBy=multi-user.target

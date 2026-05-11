@@ -6,3 +6,6 @@ ContainerName=fortress-immich-postgres
 Image=postgres:16
 Network=fortress-group-media
 NetworkAlias=postgres
+
+[Install]
+WantedBy=multi-user.target

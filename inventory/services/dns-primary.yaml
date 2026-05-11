@@ -15,7 +15,7 @@ deploy:
       image: docker.io/pihole/pihole:2025.05.0
       depends_on: [unbound]
       published_ports:
-        - bind: 0.0.0.0
+        - bind: 10.40.0.11
           host: 53
           container: 53
           protocol: tcp_udp

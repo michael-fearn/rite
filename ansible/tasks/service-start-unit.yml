@@ -3,10 +3,21 @@
     - name: Start Service container unit
       ansible.builtin.command:
         cmd: "systemctl start {{ item }}"
+    - name: Wait briefly for Service container early exits
+      ansible.builtin.pause:
+        seconds: 1
+    - name: Verify Service container unit remains active
+      ansible.builtin.command:
+        cmd: "systemctl is-active --quiet {{ item }}"
+      register: fortress_service_unit_active
+      changed_when: false
+      retries: 5
+      delay: 1
+      until: fortress_service_unit_active.rc == 0
   rescue:
     - name: Report failed Service container start
       ansible.builtin.fail:
         msg: >-
-          Failed to start {{ item }} for Service {{ deploy_service }}.
+          Failed to start or keep {{ item }} active for Service {{ deploy_service }}.
           Run systemctl status {{ item }} and journalctl -u {{ item }} on Backend VM
           {{ deploy_service_backend_vm }} for details. Rollback is an explicit operator action.

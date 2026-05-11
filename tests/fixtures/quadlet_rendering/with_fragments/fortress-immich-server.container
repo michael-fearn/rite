@@ -9,5 +9,8 @@ Network=fortress-immich
 NetworkAlias=server
 User=1000
 
+[Install]
+WantedBy=multi-user.target
+
 [Service]
 RestartSec=10

@@ -336,9 +336,17 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             playbook.index("name: Pull Service container images before systemd starts units"),
             playbook.index("name: Start Service containers in dependency order"),
         )
+        self.assertLess(
+            playbook.index("name: Enable Service Quadlet units for boot"),
+            playbook.index("name: Start Service networks before containers"),
+        )
+        self.assertIn("enabled: true", playbook)
         self.assertIn("podman image pull {{ item }}", playbook)
         self.assertIn("systemctl start {{ item }}", deploy_workflow)
-        self.assertIn("Failed to start {{ item }}", deploy_workflow)
+        self.assertIn("name: Wait briefly for Service container early exits", deploy_workflow)
+        self.assertIn("systemctl is-active --quiet {{ item }}", deploy_workflow)
+        self.assertIn("until: fortress_service_unit_active.rc == 0", deploy_workflow)
+        self.assertIn("Failed to start or keep {{ item }} active", deploy_workflow)
         self.assertIn("journalctl -u {{ item }}", deploy_workflow)
         self.assertNotIn("/srv/services/{{ deploy_service }}", deploy_workflow)
 
@@ -346,6 +354,8 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
 
         self.assertIn("name: Configure Native Service apt repository", playbook)
+        self.assertIn("name: Ensure Native Service apt repository tooling is installed", playbook)
+        self.assertIn("name: gnupg", playbook)
         self.assertIn("fortress_native_apt_repo", playbook)
         self.assertIn("name: Install Native Service package", playbook)
         self.assertIn("name: Render Native Service config files", playbook)
@@ -355,10 +365,16 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         self.assertIn("mode: \"{{ item.mode }}\"", playbook)
         self.assertIn("name: Restart Native Service after restart-marked config changes", playbook)
         self.assertIn("name: Reload Native Service after reload-only config changes", playbook)
+        self.assertIn("fortress_service_start_units | default([])", playbook)
+        self.assertIn("fortress_service_stop_units | default([])", playbook)
         self.assertIn("systemctl restart {{ fortress_native_systemd_unit }}", playbook)
         self.assertIn("systemctl reload {{ fortress_native_systemd_unit }}", playbook)
         self.assertIn("selectattr('item.action', 'equalto', 'restart')", playbook)
         self.assertIn("selectattr('item.action', 'equalto', 'reload')", playbook)
+        self.assertLess(
+            playbook.index("name: Ensure Native Service apt repository tooling is installed"),
+            playbook.index("name: Configure Native Service apt repository"),
+        )
         self.assertLess(
             playbook.index("name: Restart Native Service after restart-marked config changes"),
             playbook.index("name: Reload Native Service after reload-only config changes"),

@@ -20,4 +20,4 @@ cloud_init:
   hostname: dns-primary-vm
 backup:
   enabled: true
-ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINcmzdIFBHn1PP2hUP83Rm9mmMWaTMGo8OAnWPSoy5pM fortress-vm-prepare:dns-primary-vm:2026-05-11T03:54:34Z
+ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB4WkLgaAc6utjbNC8BZyM1Bhm5jHmimDUX/gL08dED8 fortress-vm-prepare:dns-primary-vm:2026-05-11T18:12:19Z

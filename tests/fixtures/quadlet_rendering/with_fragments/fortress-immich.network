@@ -1,3 +1,6 @@
 [Network]
 NetworkName=fortress-immich
 Label=fortress.fragment=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -220,6 +220,9 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
                     "[Network]",
                     "NetworkName=fortress-immich",
                     "",
+                    "[Install]",
+                    "WantedBy=multi-user.target",
+                    "",
                 ]
             ),
             network.content,
@@ -230,6 +233,36 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
         self.assertIn("NetworkAlias=server\n", container.content)
         self.assertIn("PublishPort=127.0.0.1:2283:2283/tcp\n", container.content)
         self.assertNotIn("AutoUpdate", container.content)
+
+    def test_tcp_udp_published_port_renders_separate_quadlet_ports(self):
+        service = {
+            "name": "dns-primary",
+            "backend": {"vm": "dns-primary-vm", "port": 53},
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "pihole",
+                        "image": "docker.io/pihole/pihole:2025.05.0",
+                        "published_ports": [
+                            {
+                                "bind": "0.0.0.0",
+                                "host": 53,
+                                "container": 53,
+                                "protocol": "tcp_udp",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+
+        rendered = render_quadlet_service(service, {})
+        container = rendered.artifacts_by_filename["fortress-dns-primary-pihole.container"]
+
+        self.assertIn("PublishPort=0.0.0.0:53:53/tcp\n", container.content)
+        self.assertIn("PublishPort=0.0.0.0:53:53/udp\n", container.content)
+        self.assertNotIn("tcp,udp", container.content)
 
     def test_container_renders_non_secret_env_and_service_secret_file_env(self):
         service = {

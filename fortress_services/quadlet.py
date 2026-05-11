@@ -54,6 +54,9 @@ def render_quadlet_service(service, vm, inventory_root=None):
                     "[Network]",
                     f"NetworkName={network_name}",
                     "",
+                    "[Install]",
+                    "WantedBy=multi-user.target",
+                    "",
                 ]
             ),
             fragment_content=fragments.get("network.network"),
@@ -100,7 +103,8 @@ def render_quadlet_container(service, vm, container):
     ]
 
     for published_port in container.get("published_ports", []) or []:
-        lines.append(f"PublishPort={_published_port(published_port)}")
+        for rendered_port in _published_ports(published_port):
+            lines.append(f"PublishPort={rendered_port}")
 
     for name, value in (container.get("env") or {}).items():
         lines.append(f"Environment={name}={_quadlet_env_value(value)}")
@@ -136,6 +140,7 @@ def render_quadlet_container(service, vm, container):
     if unit_lines:
         lines[2:2] = unit_lines
 
+    lines.extend(["", "[Install]", "WantedBy=multi-user.target"])
     return "\n".join(lines) + "\n"
 
 
@@ -173,15 +178,19 @@ def _container_runtime_name(service, container):
     return f"fortress-{service['name']}-{container['name']}"
 
 
-def _published_port(published_port):
+def _published_ports(published_port):
     bind = published_port.get("bind")
     host = published_port.get("host", published_port["container"])
     container = published_port["container"]
     protocol = published_port.get("protocol", "tcp")
-    protocol_suffix = "tcp,udp" if protocol == "tcp_udp" else protocol
-    if bind:
-        return f"{bind}:{host}:{container}/{protocol_suffix}"
-    return f"{host}:{container}/{protocol_suffix}"
+    protocols = ["tcp", "udp"] if protocol == "tcp_udp" else [protocol]
+    rendered_ports = []
+    for protocol_suffix in protocols:
+        if bind:
+            rendered_ports.append(f"{bind}:{host}:{container}/{protocol_suffix}")
+        else:
+            rendered_ports.append(f"{host}:{container}/{protocol_suffix}")
+    return rendered_ports
 
 
 def _quadlet_env_value(value):

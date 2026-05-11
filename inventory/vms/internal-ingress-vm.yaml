@@ -20,3 +20,4 @@ cloud_init:
   hostname: internal-ingress-vm
 backup:
   enabled: true
+ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP/5oDWOUNo4lHbQfoa4uOPSEzbFqu59/5bvaD1/uX8i fortress-vm-prepare:internal-ingress-vm:2026-05-11T19:46:52Z

@@ -9,3 +9,6 @@ Image=ghcr.io/paperless-ngx/paperless-ngx:2.13.5
 Network=fortress-paperless
 NetworkAlias=web
 Volume=/mnt/nas/documents:/documents:rw
+
+[Install]
+WantedBy=multi-user.target

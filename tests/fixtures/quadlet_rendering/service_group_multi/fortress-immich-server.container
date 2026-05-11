@@ -12,3 +12,6 @@ NetworkAlias=server
 PublishPort=127.0.0.1:2283:2283/tcp
 Volume=/srv/services/immich/upload:/usr/src/app/upload:rw
 Volume=/mnt/nas/media/photos:/photos:ro
+
+[Install]
+WantedBy=multi-user.target
