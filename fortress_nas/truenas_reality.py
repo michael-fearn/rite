@@ -24,6 +24,8 @@ def main(argv=None):
         return 1
 
     fake_reality = os.environ.get("FORTRESS_FAKE_TRUENAS_REALITY_JSON")
+    if os.environ.get("FORTRESS_TRUENAS_REALITY_REFRESH"):
+        fake_reality = os.environ.get("FORTRESS_FAKE_TRUENAS_REFRESHED_REALITY_JSON", fake_reality)
     if fake_reality:
         fake_preflight_failure = os.environ.get("FORTRESS_FAKE_TRUENAS_PREFLIGHT_FAILURE")
         if fake_preflight_failure:

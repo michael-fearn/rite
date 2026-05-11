@@ -587,6 +587,86 @@ class NasReconcilePlanTests(unittest.TestCase):
                 ],
             )
 
+    def test_live_acceptance_destroy_reports_refreshed_reality_postcondition_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "nas" / "truenas.sops.yaml").write_text("encrypted\n")
+            (root / "inventory" / "datasets" / "media.yaml").write_text(
+                "name: acceptance-media\n"
+                "nas: truenas\n"
+                "path: /mnt/pool/fortress-acceptance/media\n"
+                "lifecycle: ephemeral\n"
+            )
+            vm_path = root / "inventory" / "vms" / "media01.yaml"
+            vm_path.write_text(vm_path.read_text().replace("dataset: media\n", "dataset: acceptance-media\n"))
+            stale_reality = {
+                "datasets": [
+                    {
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "fortress_marker": "fortress:ephemeral-dataset:acceptance-media",
+                    }
+                ],
+                "nfs_shares": [
+                    {
+                        "name": "fortress-nfs-acceptance-media-read-write",
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "fortress_marker": "fortress:nfs-share:fortress-nfs-acceptance-media-read-write",
+                    }
+                ],
+            }
+            initial_reality_path = root / "initial-truenas-reality.json"
+            initial_reality_path.write_text(json.dumps(stale_reality))
+            refreshed_reality_path = root / "refreshed-truenas-reality.json"
+            refreshed_reality_path.write_text(json.dumps(stale_reality))
+            apply_log = root / "live-apply.jsonl"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_sops = bin_dir / "sops"
+            fake_sops.write_text("#!/usr/bin/env bash\nprintf 'acceptance-secret-token\\n'\n")
+            fake_sops.chmod(fake_sops.stat().st_mode | stat.S_IXUSR)
+
+            result = self._run_live_reconcile(
+                root,
+                "truenas",
+                "--apply",
+                "--acceptance-ephemeral-datasets",
+                "--destroy-ephemeral-datasets",
+                extra_env={
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "FORTRESS_FAKE_TRUENAS_REALITY_JSON": str(initial_reality_path),
+                    "FORTRESS_FAKE_TRUENAS_REFRESHED_REALITY_JSON": str(refreshed_reality_path),
+                    "FORTRESS_FAKE_TRUENAS_APPLY_LOG": str(apply_log),
+                },
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertTrue(output["blocked"])
+            self.assertEqual(
+                output["destroy_postcondition_findings"],
+                [
+                    {
+                        "code": "remaining_ephemeral_dataset",
+                        "dataset": "acceptance-media",
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "message": (
+                            "Ephemeral Dataset acceptance-media still exists at "
+                            "/mnt/pool/fortress-acceptance/media"
+                        ),
+                    },
+                    {
+                        "code": "remaining_derived_nfs_share",
+                        "share": "fortress-nfs-acceptance-media-read-write",
+                        "path": "/mnt/pool/fortress-acceptance/media",
+                        "message": (
+                            "Derived NFS Share fortress-nfs-acceptance-media-read-write still exists at "
+                            "/mnt/pool/fortress-acceptance/media"
+                        ),
+                    },
+                ],
+            )
+
     def test_live_apply_updates_and_deletes_fortress_owned_nfs_shares_through_truenas_client(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

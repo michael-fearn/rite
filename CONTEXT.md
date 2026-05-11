@@ -405,6 +405,9 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A Service-layer **Acceptance Test** may additionally prove **Ingress** hostname reachability when the tested **Service** declares **Ingress**.
 - A Service-layer **Acceptance Test** with multiple containers proves systemd unit activation, declared **Container Dependency** ordering, **Container Alias** resolution, and **Share-backed Volume** consumption.
 - A Service-layer **Acceptance Test** proves **Share-backed Volume** consumption by serving a pre-written marker file from the **Primary Acceptance VM**'s **Mount** through the tested **Service**.
+- A Service-layer **Acceptance Test** proves existing **Mounts** and **Share-backed Volumes** remain usable after a TrueNAS NFS service reload, without remounting VMs or redeploying Services.
+- A Service-layer **Acceptance Test** treats fresh post-reload data flow through existing **Mounts** and **Share-backed Volumes** as the contract, not stable container process identity.
+- A Service-layer **Acceptance Test** triggers the TrueNAS NFS service reload explicitly through the **Acceptance NAS Credential** rather than relying on **NAS Reconcile** to make a Share change.
 - A Service-layer **Acceptance Test** proves **Service Secret** consumption by comparing a deterministic hash from inside the container without printing the secret value.
 - User-facing HTTP Services on the **Media VM** and **Download VM** are exposed through the **Ingress** for DNS and TLS.
 - Direct client access to media and download backend ports is reserved for explicit Trusted-only emergency or administration paths.

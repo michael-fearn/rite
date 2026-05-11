@@ -493,6 +493,11 @@ def assert_cleanup_removes_nas_resources(stdout, intent):
         errors.append(f"expected cleanup to delete Ephemeral Dataset {expected_dataset}")
     if not deleted_share:
         errors.append(f"expected cleanup to delete Derived NFS Share {expected_share}")
+    postcondition_findings = payload.get("destroy_postcondition_findings")
+    if postcondition_findings is None:
+        errors.append("cleanup did not verify NAS destroy postconditions")
+    else:
+        errors.extend(finding.get("message") for finding in postcondition_findings if finding.get("message"))
     if errors:
         return subprocess.CompletedProcess([], 1, "", "; ".join(errors))
     return None

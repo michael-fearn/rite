@@ -209,6 +209,38 @@ class AcceptanceNFSSharedMountWorkflowTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_cleanup_fails_when_refreshed_reality_still_contains_dataset_or_share(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._fixture(tmp)
+            env = self._workflow_env(root, calls_log)
+            env["FORTRESS_CLEANUP_STALE_REALITY"] = "both"
+
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "acceptance-nfs-shared-mount"),
+                    "host=wintermute",
+                    "template=debian-12-base",
+                    "endpoint=truenas",
+                    "auto_confirm=true",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("cleanup failed", result.stderr)
+            self.assertIn(
+                "Ephemeral Dataset acceptance-nfs-demo still exists at /mnt/tank/fortress-acceptance/nfs-demo",
+                result.stderr,
+            )
+            self.assertIn(
+                "Derived NFS Share fortress-nfs-acceptance-nfs-demo-read-write still exists at /mnt/tank/fortress-acceptance/nfs-demo",
+                result.stderr,
+            )
+
     def test_just_recipe_and_runbook_document_workflow(self):
         justfile = (REPO_ROOT / "justfile").read_text()
         runbook = (REPO_ROOT / "runbooks" / "nas-truenas.md").read_text()
@@ -308,7 +340,13 @@ class AcceptanceNFSSharedMountWorkflowTests(unittest.TestCase):
             "fi\n"
             "if [[ \"$*\" == *--destroy-ephemeral-datasets* ]]; then python3 - <<'PY'\n"
             "import json\n"
-            "print(json.dumps({'write_actions': [{'action': 'delete_nfs_share', 'share': 'fortress-nfs-acceptance-nfs-demo-read-write'}, {'action': 'delete_dataset', 'dataset': 'acceptance-nfs-demo', 'path': '/mnt/tank/fortress-acceptance/nfs-demo'}], 'api_operations': [{'method': 'delete_nfs_share', 'share': 'fortress-nfs-acceptance-nfs-demo-read-write'}, {'method': 'delete_dataset', 'dataset': 'acceptance-nfs-demo', 'path': '/mnt/tank/fortress-acceptance/nfs-demo'}]}))\n"
+            "import os\n"
+            "findings = []\n"
+            "if os.environ.get('FORTRESS_CLEANUP_STALE_REALITY') in ('dataset', 'both'):\n"
+            "    findings.append({'code': 'remaining_ephemeral_dataset', 'dataset': 'acceptance-nfs-demo', 'path': '/mnt/tank/fortress-acceptance/nfs-demo', 'message': 'Ephemeral Dataset acceptance-nfs-demo still exists at /mnt/tank/fortress-acceptance/nfs-demo'})\n"
+            "if os.environ.get('FORTRESS_CLEANUP_STALE_REALITY') in ('share', 'both'):\n"
+            "    findings.append({'code': 'remaining_derived_nfs_share', 'share': 'fortress-nfs-acceptance-nfs-demo-read-write', 'path': '/mnt/tank/fortress-acceptance/nfs-demo', 'message': 'Derived NFS Share fortress-nfs-acceptance-nfs-demo-read-write still exists at /mnt/tank/fortress-acceptance/nfs-demo'})\n"
+            "print(json.dumps({'write_actions': [{'action': 'delete_nfs_share', 'share': 'fortress-nfs-acceptance-nfs-demo-read-write'}, {'action': 'delete_dataset', 'dataset': 'acceptance-nfs-demo', 'path': '/mnt/tank/fortress-acceptance/nfs-demo'}], 'api_operations': [{'method': 'delete_nfs_share', 'share': 'fortress-nfs-acceptance-nfs-demo-read-write'}, {'method': 'delete_dataset', 'dataset': 'acceptance-nfs-demo', 'path': '/mnt/tank/fortress-acceptance/nfs-demo'}], 'destroy_postcondition_findings': findings}))\n"
             "PY\n"
             "exit 0\n"
             "fi\n"

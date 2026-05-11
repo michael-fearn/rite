@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+FORTRESS_RUNTIME_PYTHON = Path("/opt/fortress-python/bin/python3")
+RELOAD_CREDENTIAL_ENV = "FORTRESS_SERVICE_LAYER_ACCEPTANCE_NAS_TOKEN"
 sys.path.insert(0, str(REPO_ROOT))
 
 from fortress_inventory.model import load_inventory_tree  # noqa: E402
@@ -24,6 +26,9 @@ ROLES = ("primary", "peer")
 
 
 def main():
+    if sys.argv[1:2] == ["__reload-truenas-nfs-service"]:
+        return reload_truenas_nfs_service_child(sys.argv[2:])
+
     args = parse_args(sys.argv[1:])
     if args is None:
         print(
@@ -111,6 +116,16 @@ def main():
         if verification.returncode != 0:
             return failed_after_generation(repo_root, intent, "verification", verification, args["keep_on_fail"], generated, provisioned)
 
+        progress(f"reloading TrueNAS NFS service on NAS Endpoint {intent['endpoint']}")
+        reload_result = reload_truenas_nfs_service(repo_root, intent)
+        if reload_result.returncode != 0:
+            return failed_after_generation(repo_root, intent, "TrueNAS NFS service reload", reload_result, args["keep_on_fail"], generated, provisioned)
+
+        progress("verifying post-reload Mount and Share-backed Volume data flow")
+        post_reload = verify_post_reload_data_flow(repo_root, intent)
+        if post_reload.returncode != 0:
+            return failed_after_generation(repo_root, intent, "post-reload verification", post_reload, args["keep_on_fail"], generated, provisioned)
+
         progress("cleaning up generated Acceptance resources")
         cleanup = cleanup_resources(repo_root, intent, provisioned)
         if cleanup.returncode != 0:
@@ -159,6 +174,7 @@ def resolve_intent(repo_root, inventory, args):
     if endpoint_name not in inventory.nas_endpoints:
         print(f"NAS Endpoint {endpoint_name!r} is not declared at {repo_root / 'inventory' / 'nas' / f'{endpoint_name}.yaml'}", file=sys.stderr)
         return 1
+    endpoint = inventory.nas_endpoints[endpoint_name]
     policy = inventory.acceptance_policies.get(POLICY_NAME)
     if not policy:
         print(f"Acceptance Policy {POLICY_NAME!r} is not declared at {repo_root / 'inventory' / 'acceptance' / f'{POLICY_NAME}.yaml'}", file=sys.stderr)
@@ -204,6 +220,7 @@ def resolve_intent(repo_root, inventory, args):
         "host": host_name,
         "template": template_name,
         "endpoint": endpoint_name,
+        "endpoint_config": endpoint,
         "policy": policy,
         "dataset": dataset,
         "vms": vms,
@@ -470,6 +487,108 @@ def run_native_service_deploy(repo_root, intent):
     return run([str(repo_root / "scripts" / "service-deploy"), NATIVE_SERVICE_NAME])
 
 
+def reload_truenas_nfs_service(repo_root, intent):
+    endpoint_name = intent["endpoint"]
+    endpoint_sops = repo_root / "inventory" / "nas" / f"{endpoint_name}.sops.yaml"
+    if not endpoint_sops.is_file():
+        return subprocess.CompletedProcess(
+            [],
+            1,
+            "",
+            f"NAS Endpoint Sibling SOPS File is required at {endpoint_sops}",
+        )
+    try:
+        credential = sops_extract_acceptance_credential(endpoint_sops)
+    except subprocess.CalledProcessError as error:
+        return subprocess.CompletedProcess(
+            [],
+            1,
+            error.stdout or "",
+            f"failed to decrypt Acceptance NAS Credential for NAS Endpoint {endpoint_name} from {endpoint_sops}",
+        )
+    if not credential:
+        return subprocess.CompletedProcess(
+            [],
+            1,
+            "",
+            f"missing api_credentials.acceptance.value in NAS Endpoint Sibling SOPS File for NAS Endpoint {endpoint_name}: {endpoint_sops}",
+        )
+
+    fake_reload_log = os.environ.get("FORTRESS_FAKE_TRUENAS_RELOAD_LOG")
+    endpoint = intent["endpoint_config"]
+    tls_verify = endpoint.get("tls_verify", True)
+    if fake_reload_log:
+        with Path(fake_reload_log).open("a") as handle:
+            handle.write(
+                f"truenas reload_nfs_service {endpoint_name} "
+                f"{endpoint['management_address']} {str(tls_verify).lower()} {credential}\n"
+            )
+        if os.environ.get("FORTRESS_FAKE_TRUENAS_RELOAD_FAIL"):
+            return subprocess.CompletedProcess([], 42, "", "fake TrueNAS NFS service reload failure")
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    child_env = os.environ.copy()
+    child_env[RELOAD_CREDENTIAL_ENV] = credential
+    pythonpath = child_env.get("PYTHONPATH")
+    child_env["PYTHONPATH"] = str(REPO_ROOT) if not pythonpath else f"{REPO_ROOT}{os.pathsep}{pythonpath}"
+    return run(
+        [
+            live_truenas_python(),
+            str(Path(__file__).resolve()),
+            "__reload-truenas-nfs-service",
+            endpoint_name,
+            endpoint["management_address"],
+            "true" if tls_verify else "false",
+        ],
+        env=child_env,
+    )
+
+
+def reload_truenas_nfs_service_child(argv):
+    if len(argv) != 3:
+        print("usage: __reload-truenas-nfs-service <endpoint> <management-address> <tls-verify>", file=sys.stderr)
+        return 2
+    endpoint_name, management_address, tls_verify_text = argv
+    credential = os.environ.get(RELOAD_CREDENTIAL_ENV)
+    if not credential:
+        print(f"missing {RELOAD_CREDENTIAL_ENV} for NAS Endpoint {endpoint_name}", file=sys.stderr)
+        return 1
+    try:
+        from fortress_nas.truenas_client import LiveTrueNasClient, TrueNasCapabilityError
+
+        with LiveTrueNasClient.connect(
+            management_address,
+            credential,
+            tls_verify=tls_verify_text == "true",
+        ) as client:
+            client.reload_nfs_service()
+    except TrueNasCapabilityError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
+
+
+def live_truenas_python():
+    override = os.environ.get("FORTRESS_PYTHON")
+    if override:
+        return override
+    if FORTRESS_RUNTIME_PYTHON.is_file():
+        return str(FORTRESS_RUNTIME_PYTHON)
+    return sys.executable
+
+
+def sops_extract_acceptance_credential(endpoint_sops):
+    return run(
+        [
+            "sops",
+            "--decrypt",
+            "--extract",
+            '["api_credentials"]["acceptance"]["value"]',
+            str(endpoint_sops),
+        ]
+    ).stdout.strip()
+
+
 def verify_service_layer(repo_root, intent):
     hostvars = load_hostvars(repo_root)
     mount_point = intent["policy"]["mount"]["mount_point"]
@@ -519,6 +638,61 @@ def verify_service_layer(repo_root, intent):
         if result.returncode != 0:
             return result
     return subprocess.CompletedProcess([], 0, "", "")
+
+
+def verify_post_reload_data_flow(repo_root, intent):
+    hostvars = load_hostvars(repo_root)
+    mount_point = intent["policy"]["mount"]["mount_point"]
+    primary, peer = intent["vms"]
+    marker = os.environ.get("FORTRESS_SERVICE_LAYER_POST_RELOAD_MARKER", "post-reload-service-layer-marker")
+    service_content = os.environ.get("FORTRESS_SERVICE_LAYER_POST_RELOAD_CONTENT", "post-reload-service-layer-content")
+    marker_file = f"{mount_point}/post-reload-marker.txt"
+    index_file = f"{mount_point}/index.html"
+    marker_written = False
+    checks = [
+        (
+            "writing fresh post-reload marker through Primary Acceptance VM Mount",
+            primary,
+            ["sh", "-lc", f"printf {shlex.quote(marker)} > {shlex.quote(marker_file)}"],
+            None,
+            True,
+        ),
+        (
+            "reading fresh post-reload marker through Peer Acceptance VM Mount",
+            peer,
+            ["cat", marker_file],
+            marker,
+            False,
+        ),
+        (
+            "updating Service-served index.html through Primary Acceptance VM Mount",
+            primary,
+            ["sh", "-lc", f"printf {shlex.quote(service_content)} > {shlex.quote(index_file)}"],
+            None,
+            False,
+        ),
+        (
+            "checking already-running Service serves fresh post-reload content",
+            peer,
+            ["curl", "-fsS", f"http://{primary['client']}:8080/"],
+            service_content,
+            False,
+        ),
+    ]
+    for description, vm, remote_command, expected_stdout, creates_marker in checks:
+        progress(description)
+        result = verify_ssh_check(repo_root, vm["name"], hostvars, remote_command, expected_stdout)
+        if result.returncode != 0:
+            if marker_written:
+                cleanup_post_reload_marker(repo_root, primary, hostvars, marker_file)
+            return result
+        marker_written = marker_written or creates_marker
+    return cleanup_post_reload_marker(repo_root, primary, hostvars, marker_file)
+
+
+def cleanup_post_reload_marker(repo_root, primary, hostvars, marker_file):
+    progress("removing fresh post-reload marker from Primary Acceptance VM Mount")
+    return verify_ssh_check(repo_root, primary["name"], hostvars, ["rm", "-f", marker_file], None)
 
 
 def verify_ssh_check(repo_root, vm_name, hostvars, remote_command, expected_stdout):
@@ -674,6 +848,11 @@ def assert_cleanup_removes_nas_resources(stdout, intent):
         errors.append(f"expected cleanup to delete Ephemeral Dataset {expected_dataset}")
     if not deleted_share:
         errors.append(f"expected cleanup to delete Derived NFS Share {expected_share}")
+    postcondition_findings = payload.get("destroy_postcondition_findings")
+    if postcondition_findings is None:
+        errors.append("cleanup did not verify NAS destroy postconditions")
+    else:
+        errors.extend(finding.get("message") for finding in postcondition_findings if finding.get("message"))
     if errors:
         return subprocess.CompletedProcess([], 1, "", "; ".join(errors))
     return None
@@ -716,11 +895,12 @@ def delete_generated_service_artifacts(repo_root, stderr):
             stderr.append(f"failed to delete generated artifact {generated_dir}: {error}")
 
 
-def run(command, input_text=None):
+def run(command, input_text=None, env=None):
     try:
         return subprocess.run(
             command,
             input=input_text,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -83,6 +83,15 @@ class VMNFSMountsRoleTests(unittest.TestCase):
         self.assertIn("ansible.builtin.apt", tasks)
         self.assertIn("name: nfs-common", tasks)
 
+    def test_role_retries_starting_nfs_mount_units(self):
+        tasks = (REPO_ROOT / "ansible" / "roles" / "vm_nfs_mounts" / "tasks" / "main.yml").read_text()
+
+        self.assertIn("name: Enable and start NFS mount units", tasks)
+        self.assertIn("register: fortress_nfs_mount_start", tasks)
+        self.assertIn("until: fortress_nfs_mount_start is succeeded", tasks)
+        self.assertIn("retries:", tasks)
+        self.assertIn("delay:", tasks)
+
     def test_role_renders_read_write_access_as_rw_option(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

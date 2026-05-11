@@ -60,6 +60,11 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
             self.assertIn("service-layer acceptance: verifying Service-layer contract", result.stdout)
             self.assertIn("service-layer acceptance: checking Native Service systemd unit caddy", result.stdout)
             self.assertIn("service-layer acceptance: checking Service Secret bytes inside web container", result.stdout)
+            self.assertIn("service-layer acceptance: reloading TrueNAS NFS service on NAS Endpoint truenas", result.stdout)
+            self.assertIn("service-layer acceptance: verifying post-reload Mount and Share-backed Volume data flow", result.stdout)
+            self.assertIn("service-layer acceptance: writing fresh post-reload marker through Primary Acceptance VM Mount", result.stdout)
+            self.assertIn("service-layer acceptance: reading fresh post-reload marker through Peer Acceptance VM Mount", result.stdout)
+            self.assertIn("service-layer acceptance: checking already-running Service serves fresh post-reload content", result.stdout)
             self.assertIn("service-layer acceptance: cleaning up generated Acceptance resources", result.stdout)
             calls = calls_log.read_text().splitlines()
             self.assertEqual(
@@ -92,6 +97,26 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
                     *self._ssh_calls("tmp-service-peer", "10.10.0.234", "curl", "-fsS", "http://10.10.0.233:8080/"),
                     *self._ssh_calls("tmp-service-primary", "10.10.0.233", "systemctl", "is-active", "caddy"),
                     *self._ssh_calls("tmp-service-peer", "10.10.0.234", "curl", "-fsS", "http://10.10.0.233:18080/"),
+                    "sops --decrypt --extract [\"api_credentials\"][\"acceptance\"][\"value\"] " + str(root / "inventory" / "nas" / "truenas.sops.yaml"),
+                    "truenas reload_nfs_service truenas 10.10.0.15 true acceptance-secret-token",
+                    f"ansible-inventory -i {root / 'inventory' / 'fortress.yaml'} --list",
+                    *self._ssh_calls(
+                        "tmp-service-primary",
+                        "10.10.0.233",
+                        "sh",
+                        "-lc",
+                        "printf post-reload-service-layer-marker > /mnt/service-layer/post-reload-marker.txt",
+                    ),
+                    *self._ssh_calls("tmp-service-peer", "10.10.0.234", "cat", "/mnt/service-layer/post-reload-marker.txt"),
+                    *self._ssh_calls(
+                        "tmp-service-primary",
+                        "10.10.0.233",
+                        "sh",
+                        "-lc",
+                        "printf post-reload-service-layer-content > /mnt/service-layer/index.html",
+                    ),
+                    *self._ssh_calls("tmp-service-peer", "10.10.0.234", "curl", "-fsS", "http://10.10.0.233:8080/"),
+                    *self._ssh_calls("tmp-service-primary", "10.10.0.233", "rm", "-f", "/mnt/service-layer/post-reload-marker.txt"),
                     "vm-destroy tmp-service-primary --delete-vm-yaml",
                     "vm-destroy tmp-service-peer --delete-vm-yaml",
                     "nas-reconcile-plan --live truenas --acceptance-ephemeral-datasets --destroy-ephemeral-datasets --apply",
@@ -189,6 +214,80 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
                     self.assertIn("dataset: acceptance-service-layer", primary_yaml)
                     self.assertIn("mount_point: /mnt/service-layer", primary_yaml)
 
+    def test_reload_failure_reports_reload_phase_and_obeys_keep_on_fail(self):
+        scenarios = {
+            "cleanup": ([], "TrueNAS NFS service reload failed", True),
+            "keep": (["keep_on_fail=true"], "preserved Service-layer acceptance resources", False),
+        }
+        for scenario, (extra_args, message, should_cleanup) in scenarios.items():
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                root, calls_log = self._fixture(tmp)
+                env = self._workflow_env(root, calls_log)
+                env["FORTRESS_FAKE_TRUENAS_RELOAD_FAIL"] = "1"
+
+                result = subprocess.run(
+                    [
+                        str(REPO_ROOT / "scripts" / "acceptance-service-layer"),
+                        "host=wintermute",
+                        "template=debian-12-base",
+                        "endpoint=truenas",
+                        "auto_confirm=true",
+                        *extra_args,
+                    ],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(message, result.stderr)
+                self.assertIn("truenas reload_nfs_service truenas 10.10.0.15 true acceptance-secret-token", calls_log.read_text())
+                if should_cleanup:
+                    self.assertIn("vm-destroy tmp-service-primary --delete-vm-yaml", calls_log.read_text())
+                    self.assertFalse((root / "inventory" / "services" / "tmp-service-layer.yaml").exists())
+                else:
+                    self.assertNotIn("vm-destroy tmp-service-primary --delete-vm-yaml", calls_log.read_text())
+                    self.assertTrue((root / "inventory" / "services" / "tmp-service-layer.yaml").exists())
+
+    def test_reload_uses_selected_fortress_python_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._fixture(tmp)
+            fake_python = root / "bin" / "fortress-python"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'fortress-python %s\\n' \"$*\" >> \"$CALLS_LOG\"\n"
+                "printf 'reload-token=%s\\n' \"$FORTRESS_SERVICE_LAYER_ACCEPTANCE_NAS_TOKEN\" >> \"$CALLS_LOG\"\n"
+            )
+            fake_python.chmod(fake_python.stat().st_mode | stat.S_IXUSR)
+            env = self._workflow_env(root, calls_log)
+            env.pop("FORTRESS_FAKE_TRUENAS_RELOAD_LOG")
+            env["FORTRESS_PYTHON"] = str(fake_python)
+
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "acceptance-service-layer"),
+                    "host=wintermute",
+                    "template=debian-12-base",
+                    "endpoint=truenas",
+                    "auto_confirm=true",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = calls_log.read_text()
+            self.assertIn(
+                f"fortress-python {REPO_ROOT / 'scripts' / 'acceptance-service-layer'} __reload-truenas-nfs-service truenas 10.10.0.15 true",
+                calls,
+            )
+            self.assertIn("reload-token=acceptance-secret-token", calls)
+
     def test_static_policy_dataset_recipe_and_runbook_document_workflow(self):
         policy = (REPO_ROOT / "inventory" / "acceptance" / "service-layer.yaml").read_text()
         dataset = (REPO_ROOT / "inventory" / "datasets" / "acceptance-service-layer.yaml").read_text()
@@ -252,6 +351,7 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
             "name: acceptance-service-layer\nnas: truenas\npath: /mnt/tank/fortress-acceptance/service-layer\nlifecycle: ephemeral\n"
         )
         (inventory / "nas" / "truenas.yaml").write_text("name: truenas\nmanagement_address: 10.10.0.15\nshare_address: 10.40.0.15\n")
+        (inventory / "nas" / "truenas.sops.yaml").write_text("api_credentials:\n  acceptance:\n    value: acceptance-secret-token\n")
         calls_log = root / "calls.log"
         self._write_fake_tools(root, calls_log)
         return root, calls_log
@@ -280,7 +380,7 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
             "if [ \"$FORTRESS_FAIL_PHASE\" = nas-reconcile-plan ]; then echo 'nas reconcile failed intentionally' >&2; exit 42; fi\n"
             "if [[ \"$*\" == *--destroy-ephemeral-datasets* ]]; then python3 - <<'PY'\n"
             "import json\n"
-            "print(json.dumps({'write_actions': [{'action': 'delete_nfs_share', 'share': 'fortress-nfs-acceptance-service-layer-read-write'}, {'action': 'delete_dataset', 'dataset': 'acceptance-service-layer'}], 'api_operations': []}))\n"
+            "print(json.dumps({'write_actions': [{'action': 'delete_nfs_share', 'share': 'fortress-nfs-acceptance-service-layer-read-write'}, {'action': 'delete_dataset', 'dataset': 'acceptance-service-layer'}], 'api_operations': [], 'destroy_postcondition_findings': []}))\n"
             "PY\n"
             "exit 0\n"
             "fi\n"
@@ -295,6 +395,7 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
         (bin_dir / "sops").write_text(
             "#!/usr/bin/env bash\n"
             "printf 'sops %s\\n' \"$*\" >> \"$CALLS_LOG\"\n"
+            "if [ \"$1\" = \"--decrypt\" ]; then echo acceptance-secret-token; fi\n"
         )
         (bin_dir / "sops").chmod((bin_dir / "sops").stat().st_mode | stat.S_IXUSR)
         (bin_dir / "ansible-inventory").write_text(
@@ -311,7 +412,9 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
             "if [ \"$FORTRESS_FAIL_PHASE\" = ssh ]; then echo 'verification failed intentionally' >&2; exit 42; fi\n"
             "case \"$*\" in\n"
             "  *'sha256sum'*) echo '" + hashlib.sha256(b"generated-service-layer-acceptance-token").hexdigest() + "' ;;\n"
-            "  *'curl -fsS http://10.10.0.233:8080/'*) echo service-layer-marker ;;\n"
+            "  *'cat /mnt/service-layer/post-reload-marker.txt'*) echo post-reload-service-layer-marker ;;\n"
+            "  *'curl -fsS http://10.10.0.233:8080/'*)\n"
+            "    if [ -f \"$FORTRESS_POST_RELOAD_CURL\" ]; then echo post-reload-service-layer-content; else touch \"$FORTRESS_POST_RELOAD_CURL\"; echo service-layer-marker; fi ;;\n"
             "  *'curl -fsS http://10.10.0.233:18080/'*) echo native-service-layer-marker ;;\n"
             "esac\n"
         )
@@ -336,6 +439,8 @@ class AcceptanceServiceLayerWorkflowTests(unittest.TestCase):
         env["FORTRESS_VERIFY_RETRIES"] = "1"
         env["FORTRESS_VERIFY_RETRY_DELAY"] = "0"
         env["FORTRESS_SERVICE_LAYER_MARKER"] = "service-layer-marker"
+        env["FORTRESS_POST_RELOAD_CURL"] = str(root / "post-reload-curl-seen")
+        env["FORTRESS_FAKE_TRUENAS_RELOAD_LOG"] = str(calls_log)
         return env
 
 

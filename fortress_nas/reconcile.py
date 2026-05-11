@@ -158,6 +158,46 @@ def build_nas_reconcile_plan(
     return result
 
 
+def destroy_ephemeral_postcondition_findings(inventory, reality):
+    ephemeral_datasets = [
+        dataset
+        for dataset in inventory.datasets.values()
+        if dataset.get("lifecycle") == "ephemeral" and dataset.get("path")
+    ]
+    findings = []
+    for dataset in ephemeral_datasets:
+        actual_dataset = reality.datasets.get(dataset["path"])
+        if actual_dataset:
+            findings.append(
+                {
+                    "code": "remaining_ephemeral_dataset",
+                    "dataset": dataset.get("name"),
+                    "path": dataset["path"],
+                    "message": (
+                        f"Ephemeral Dataset {dataset.get('name')} still exists at "
+                        f"{dataset['path']}"
+                    ),
+                }
+            )
+    for share in sorted(reality.nfs_shares, key=lambda item: item.get("name", "")):
+        if not _is_fortress_owned_share(share):
+            continue
+        for dataset in ephemeral_datasets:
+            if _paths_overlap(share.get("path"), dataset["path"]):
+                findings.append(
+                    {
+                        "code": "remaining_derived_nfs_share",
+                        "share": share.get("name"),
+                        "path": share.get("path"),
+                        "message": (
+                            f"Derived NFS Share {share.get('name')} still exists at "
+                            f"{share.get('path')}"
+                        ),
+                    }
+                )
+    return findings
+
+
 def _ephemeral_dataset_write_actions_and_findings(dataset, reality, destroy=False):
     dataset_path = dataset.get("path")
     if not dataset_path:

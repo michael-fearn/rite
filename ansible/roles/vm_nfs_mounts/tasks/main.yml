@@ -42,4 +42,8 @@
   loop: "{{ fortress_nfs_unit_templates.results | default([]) }}"
   loop_control:
     label: "{{ item.item.mount_point }}"
+  register: fortress_nfs_mount_start
+  until: fortress_nfs_mount_start is succeeded
+  retries: "{{ fortress_nfs_mount_start_retries | default(6) }}"
+  delay: "{{ fortress_nfs_mount_start_delay | default(10) }}"
   when: (fortress_systemd_unit_dir | default('/etc/systemd/system')) == '/etc/systemd/system'

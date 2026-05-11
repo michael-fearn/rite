@@ -18,6 +18,7 @@ from fortress_nas.reconcile import (
     NasApplyError,
     RecordingNasClient,
     build_nas_reconcile_plan,
+    destroy_ephemeral_postcondition_findings,
     load_reality,
 )
 from fortress_nas.truenas_client import LiveTrueNasClient, TrueNasCapabilityError
@@ -88,6 +89,23 @@ def main():
     except ReconcileCommandError as error:
         print(error, file=sys.stderr)
         return 1
+    if (
+        args.live
+        and args.apply
+        and args.acceptance_ephemeral_datasets
+        and args.destroy_ephemeral_datasets
+        and not plan["blocked"]
+    ):
+        try:
+            refreshed_reality = _load_live_reality(repo_root, inventory, args, refreshed=True)["reality"]
+        except ReconcileCommandError as error:
+            print(error, file=sys.stderr)
+            return 1
+        plan["destroy_postcondition_findings"] = destroy_ephemeral_postcondition_findings(
+            inventory,
+            refreshed_reality,
+        )
+        plan["blocked"] = bool(plan["destroy_postcondition_findings"])
     if args.live:
         plan["connection"][args.live]["credentials"] = "operator_environment"
         plan["connection"][args.live]["credential_source"] = (
@@ -98,7 +116,7 @@ def main():
     return 1 if plan["blocked"] else 0
 
 
-def _load_live_reality(repo_root, inventory, args):
+def _load_live_reality(repo_root, inventory, args, refreshed=False):
     endpoint_name = args.live
     endpoint_yaml = repo_root / "inventory" / "nas" / f"{endpoint_name}.yaml"
     if endpoint_name not in inventory.nas_endpoints or not endpoint_yaml.is_file():
@@ -136,6 +154,8 @@ def _load_live_reality(repo_root, inventory, args):
         )
 
     child_env = os.environ.copy()
+    if refreshed:
+        child_env["FORTRESS_TRUENAS_REALITY_REFRESH"] = "1"
     api_token_env = _credential_env_name(endpoint_name, acceptance=args.acceptance_ephemeral_datasets)
     child_env[api_token_env] = credential
     pythonpath = child_env.get("PYTHONPATH")
