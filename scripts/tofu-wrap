@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import subprocess
 import sys
@@ -26,10 +27,13 @@ def main(argv=None):
     tofu_root = repo_root / "tofu"
     try:
         selected_vm = _selected_vm_arg(argv)
-        token_env = _host_secret_env(repo_root, selected_vm)
+        provider_hosts = _provider_hosts(repo_root, selected_vm)
+        token_env = _host_secret_env(repo_root, selected_vm, provider_hosts=provider_hosts)
         generate_command = [str(_script_root() / "tofu-generate"), str(repo_root)]
         if selected_vm:
             generate_command.extend(["--selected-vm", selected_vm])
+            for host in sorted(provider_hosts):
+                generate_command.extend(["--provider-host", host])
         subprocess.run(generate_command, check=True)
         env = os.environ.copy()
         env.update(token_env)
@@ -46,14 +50,15 @@ class WrapperError(Exception):
     pass
 
 
-def _host_secret_env(repo_root, selected_vm=None):
+def _host_secret_env(repo_root, selected_vm=None, provider_hosts=None):
     model = load_inventory_tree(repo_root)
     hosts = model.hosts
     if selected_vm:
         if selected_vm not in model.vms:
             raise WrapperError(f"selected VM {selected_vm!r} is not declared in Inventory")
         host = model.vms[selected_vm].get("placement", {}).get("host")
-        hosts = {host: model.hosts[host]} if host in model.hosts else {}
+        selected_hosts = {host, *(provider_hosts or [])}
+        hosts = {selected_host: model.hosts[selected_host] for selected_host in selected_hosts if selected_host in model.hosts}
     env = {}
     for host in sorted(hosts):
         host_sops = repo_root / "inventory" / "hosts" / f"{host}.sops.yaml"
@@ -79,6 +84,43 @@ def _selected_vm_arg(argv):
             if name == "selected_vm":
                 return value
     return None
+
+
+def _provider_hosts(repo_root, selected_vm=None):
+    if not selected_vm:
+        return set()
+    state_hosts = _state_provider_hosts(repo_root)
+    model = load_inventory_tree(repo_root)
+    selected_host = model.vms.get(selected_vm, {}).get("placement", {}).get("host")
+    if selected_host:
+        state_hosts.add(selected_host)
+    return state_hosts
+
+
+def _state_provider_hosts(repo_root):
+    state_file = repo_root / "tofu" / "terraform.tfstate"
+    if not state_file.is_file():
+        return set()
+    try:
+        state = json.loads(state_file.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise WrapperError(f"failed to read OpenTofu state providers from {state_file}: {error}") from error
+    alias_to_host = {
+        hcl_identifier(host): host
+        for host in load_inventory_tree(repo_root).hosts
+    }
+    hosts = set()
+    for resource in state.get("resources", []) or []:
+        provider = resource.get("provider", "")
+        marker = 'provider["registry.opentofu.org/bpg/proxmox"].'
+        if marker not in provider:
+            continue
+        alias = provider.rsplit(".", 1)[-1]
+        host = alias_to_host.get(alias)
+        if not host:
+            raise WrapperError(f"OpenTofu state references unknown Proxmox provider alias {alias!r}")
+        hosts.add(host)
+    return hosts
 
 
 def _script_root():

@@ -152,6 +152,18 @@ _Avoid_: dev VM, remote editor, jump box.
 A deliberately unlocked period during which a Remote Operator Workstation has the credentials needed to run fortress Operator workflows.
 _Avoid_: permanent remote access, always-on dev credentials.
 
+**Hosted Tailnet**:
+The Tailscale-managed tailnet used as the immediate remote-access control plane before the Headscale VM is ready.
+_Avoid_: Headscale, local tailnet, VPN.
+
+**Tailnet Subnet Router**:
+A tailnet-enrolled network router that advertises selected fortress VLAN routes to Remote Operator Workstations.
+_Avoid_: installing Tailscale everywhere, VPN VM.
+
+**Tailnet Auth Key**:
+An encrypted Tailscale enrollment credential used by the Tailnet Subnet Router during Configure.
+_Avoid_: VPN password, login token, machine credential.
+
 **Bootstrap**:
 The one-shot transition of a freshly-installed Host from the shared bootstrap SSH key to a unique per-host SSH key stored encrypted in the repo. Refuses to re-run.
 _Avoid_: init; provision (reserve for the tofu step on VMs).
@@ -211,7 +223,7 @@ _Avoid_: identity, key (be specific).
 _Avoid_: secrets file, encrypted store, vault.
 
 **Service Secret**:
-An encrypted value in a Service's Sibling SOPS File that is installed as a Podman secret and consumed through a `_FILE` environment variable.
+An encrypted structured entry in a Service's Sibling SOPS File whose `value` is installed as a Podman secret and consumed through the Service application's native `_FILE` environment variable when one exists.
 _Avoid_: environment secret (the secret value is not an environment variable).
 
 ### Service substrate
@@ -364,8 +376,18 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 
 - A **Host** runs zero or more **VMs** and holds zero or more **Templates**.
 - A **VM** is provisioned from one **Template** and runs zero or more **Services**.
+- A **Remote Operator Workstation** sits outside the fortress-managed infrastructure failure domain.
 - A **Remote Operator Workstation** is trusted to run the same Operator workflows as the local workstation.
 - A **Remote Operator Workstation** gains workflow authority only during a **Remote Operator Session**.
+- A **Remote Operator Workstation** uses the **Hosted Tailnet** for immediate remote reachability while the **Headscale VM** is not ready.
+- A **Remote Operator Workstation** reaches fortress networks through a **Tailnet Subnet Router** rather than direct Tailscale installs on each VM.
+- The initial **Tailnet Subnet Router** is `tailnet-subnet-router-vm` at `10.20.0.20/24` on the `molly` **Host**.
+- The initial **Tailnet Subnet Router** is declared as an ordinary long-lived **VM** in **Inventory**.
+- The initial **Tailnet Subnet Router** is attached to the **Trusted VLAN** because it extends trusted Operator reachability.
+- The **Tailnet Subnet Router** is routing-only; it is not a Remote Operator Workstation.
+- The **Tailnet Subnet Router** enrolls into the **Hosted Tailnet** using a **Tailnet Auth Key** stored in its **Sibling SOPS File**.
+- **Tailnet Subnet Router** setup is VM-level configuration, not a **Service**.
+- During early bring-up, the **Tailnet Subnet Router** advertises every fortress VLAN route needed for remote recovery and implementation work.
 - The **Firewall Matrix** supersedes earlier service placement and NAS mount layout notes.
 - The **Ingress** VM is attached to the **Infrastructure VLAN** at `10.40.0.16/24`.
 - The primary **DNS VM** is `dns-primary-vm` at `10.40.0.11/24` on the `straylight` Host.
@@ -453,6 +475,10 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - DMZ ingress rules are future-only and are not part of the internal firewall baseline.
 - Every **Entity** may have a **Sibling SOPS File**.
 - A **Service Secret** belongs to exactly one **Service** and is installed under a service-scoped Podman secret name.
+- All **Service Secrets** for a **Service** live in that Service's **Sibling SOPS File**.
+- A **Service Secret** stores its secret bytes under `value` and records `created` and `version` metadata alongside that value.
+- A **Service Secret** name describes its purpose in fortress language, not the Service application's environment variable name.
+- The Pi-hole web/API password for `dns-primary` is represented as the `web_api_password` **Service Secret**.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
 - A **NAS Endpoint** is an **Entity**.
 - A **NAS Endpoint** has zero or more **Datasets**.

@@ -246,6 +246,30 @@ class InventorySchemaTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("nfs_mounts", result.stdout + result.stderr)
 
+    def test_vm_schema_accepts_tailnet_subnet_router_declaration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vm_yaml = Path(tmp) / "tailnet-subnet-router-vm.yaml"
+            vm_yaml.write_text(
+                "vmid: 1020\n"
+                "placement:\n"
+                "  host: molly\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 1\n"
+                "  memory: 512\n"
+                "cloud_init:\n"
+                "  hostname: tailnet-subnet-router-vm\n"
+                "tailnet_subnet_router:\n"
+                "  advertise_routes:\n"
+                "    - 10.10.0.0/24\n"
+                "    - 10.40.0.0/24\n"
+            )
+
+            result = self.run_schema("inventory/vms/_schema.json", str(vm_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_service_schema_accepts_share_backed_volumes(self):
         with tempfile.TemporaryDirectory() as tmp:
             service_yaml = Path(tmp) / "immich.yaml"

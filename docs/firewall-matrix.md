@@ -29,6 +29,7 @@ Existing Proxmox Host and NAS IPs are authoritative inventory facts and must be 
 | `10.10.0.13` | `neuromancer` | Management | Proxmox Host |
 | `10.10.0.14` | `molly` | Management | Proxmox Host |
 | `10.10.0.15` | `NAS` | Management | TrueNAS management address |
+| `10.20.0.20` | `tailnet-subnet-router-vm` | Trusted | Tailnet Subnet Router |
 | `10.40.0.15` | `NAS` | Infrastructure | TrueNAS share address |
 
 ## Infrastructure VMs
@@ -103,6 +104,14 @@ Guest must not use internal DNS and must not resolve internal `*.fearn.cloud` re
 | `ADMIN-005-DENY-NONADMIN-ADMIN-PORTS` | Known, IoT, Guest | Management, Infrastructure admin ports | Any | Any | Yes | Non-admin networks cannot reach admin surfaces |
 
 Trusted VLAN is the admin workstation network. Known is the ordinary non-admin client network.
+
+## Remote Operator Access
+
+| VM | Address | Host | Role | Storage |
+| --- | --- | --- | --- | --- |
+| `tailnet-subnet-router-vm` | `10.20.0.20` | `molly` | Tailnet Subnet Router for Hosted Tailnet | VM-local |
+
+The Tailnet Subnet Router is attached to the Trusted VLAN because it extends trusted Operator reachability. During early bring-up, it advertises Management, Trusted, Known, IoT, Infrastructure, Apps, DMZ, and Guest VLAN routes to the Hosted Tailnet. Tighten this route scope after remote operations and firewall policy are stable.
 
 ## Internal Ingress and Identity
 

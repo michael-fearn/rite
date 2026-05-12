@@ -90,6 +90,8 @@ class VMConfigureWorkflowTests(unittest.TestCase):
             self.assertIn("inventory/vms/media01.sops.yaml -- ansible-playbook", calls)
             self.assertIn("ansible/playbooks/vm-configure.yml", calls)
             self.assertIn("--limit media01", calls)
+            self.assertIn('"fortress_vm_sops_file":', calls)
+            self.assertIn("inventory/vms/media01.sops.yaml", calls)
 
     def test_tmpfs_key_wrapper_decrypts_structured_bootstrap_private_key(self):
         decrypt_keys = (REPO_ROOT / "scripts" / "decrypt-keys").read_text()
@@ -114,6 +116,16 @@ class VMConfigureWorkflowTests(unittest.TestCase):
         self.assertIn("name: vm_nfs_mounts", playbook)
         self.assertLess(
             playbook.index("name: vm_nfs_mounts"),
+            playbook.index("name: vm_admin_user"),
+        )
+
+    def test_vm_configure_playbook_configures_tailnet_subnet_router_before_admin_finalization(self):
+        playbook = (REPO_ROOT / "ansible" / "playbooks" / "vm-configure.yml").read_text()
+
+        self.assertIn("name: tailnet_subnet_router", playbook)
+        self.assertIn("when: fortress_vm.tailnet_subnet_router is defined", playbook)
+        self.assertLess(
+            playbook.index("name: tailnet_subnet_router"),
             playbook.index("name: vm_admin_user"),
         )
 

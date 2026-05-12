@@ -1,0 +1,33 @@
+vmid: 1020
+description: Trusted VLAN Tailnet Subnet Router VM
+placement:
+  host: molly
+source:
+  template: debian-13-base
+hardware:
+  cores: 1
+  memory: 512
+  disks:
+    - storage: local-lvm
+      size: 8G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 20
+      address: 10.20.0.20/24
+      gateway: 10.20.0.1
+cloud_init:
+  hostname: tailnet-subnet-router-vm
+tailnet_subnet_router:
+  advertise_routes:
+    - 10.10.0.0/24
+    - 10.20.0.0/24
+    - 10.25.0.0/24
+    - 10.30.0.0/24
+    - 10.40.0.0/24
+    - 10.50.0.0/24
+    - 10.60.0.0/24
+    - 10.70.0.0/24
+backup:
+  enabled: true
+ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnI+c8tss8bh2EUI+zz6iEVTL25qd7wOAu1ah3SoE4F fortress-vm-prepare:tailnet-subnet-router-vm:2026-05-12T17:27:55Z

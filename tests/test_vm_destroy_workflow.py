@@ -76,6 +76,12 @@ class VMDestroyWorkflowTests(unittest.TestCase):
                 calls_log.read_text().splitlines(),
             )
 
+    def test_vm_destroy_uses_selected_vm_with_wrapper_state_provider_coverage(self):
+        script = (REPO_ROOT / "scripts" / "vm-destroy").read_text()
+
+        self.assertIn('"destroy"', script)
+        self.assertIn('f"selected_vm={vm}"', script)
+
     def test_vm_destroy_deletes_sibling_sops_file_and_preserves_vm_yaml_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, _calls_log = self._workflow_fixture(tmp)

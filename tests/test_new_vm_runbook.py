@@ -13,7 +13,7 @@ class NewVMRunbookTests(unittest.TestCase):
         content = runbook.read_text()
         expected_phrases = [
             "inventory/vms/<vm>.yaml",
-            "Prepare refuses to run when inventory/vms/<vm>.sops.yaml already exists",
+            "Prepare refuses to run when inventory/vms/<vm>.sops.yaml already contains VM SSH key material",
             "public key is plaintext in inventory/vms/<vm>.yaml",
             "private key is encrypted in inventory/vms/<vm>.sops.yaml",
             "just vm-up vm=<name>",

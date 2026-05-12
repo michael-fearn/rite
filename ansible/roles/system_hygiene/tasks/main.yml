@@ -18,3 +18,29 @@
   ansible.builtin.command:
     cmd: "timedatectl set-timezone {{ host_timezone | default('Etc/UTC') }}"
   changed_when: false
+
+- name: Ensure Proxmox snippets directory exists for cloud-init userdata
+  ansible.builtin.file:
+    path: /var/lib/vz/snippets
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure local Proxmox storage accepts cloud-init snippets
+  ansible.builtin.shell: |
+    set -eu
+    content="$(awk '
+      $1 == "dir:" && $2 == "local" { in_local=1; next }
+      in_local && $1 == "content" { print $2; exit }
+      in_local && /^[^[:space:]]/ { exit }
+    ' /etc/pve/storage.cfg)"
+    case ",${content}," in
+      *,snippets,*) exit 0 ;;
+    esac
+    pvesm set local --content "${content},snippets"
+    echo changed
+  args:
+    executable: /bin/bash
+  register: fortress_local_snippets_content
+  changed_when: fortress_local_snippets_content.rc == 0 and fortress_local_snippets_content.stdout != ""

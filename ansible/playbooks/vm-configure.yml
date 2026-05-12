@@ -16,6 +16,12 @@
         name: vm_nfs_mounts
       tags: [vm_nfs_mounts]
 
+    - name: Configure Tailnet Subnet Router
+      ansible.builtin.include_role:
+        name: tailnet_subnet_router
+      when: fortress_vm.tailnet_subnet_router is defined
+      tags: [tailnet_subnet_router]
+
     - name: Finalize VM admin user
       ansible.builtin.include_role:
         name: vm_admin_user

@@ -1,0 +1,88 @@
+- name: Install Tailscale apt repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update_cache: true
+
+- name: Install Tailscale apt keyring
+  ansible.builtin.get_url:
+    url: https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    mode: "0644"
+
+- name: Configure Tailscale apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/tailscale.sources
+    mode: "0644"
+    content: |
+      Types: deb
+      URIs: https://pkgs.tailscale.com/stable/debian
+      Suites: trixie
+      Components: main
+      Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+
+- name: Enable IPv4 forwarding for subnet routing
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    reload: true
+
+- name: Enable IPv6 forwarding for subnet routing
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: "1"
+    state: present
+    reload: true
+
+- name: Check Tailscale enrollment status
+  ansible.builtin.command: tailscale status --json
+  changed_when: false
+  failed_when: false
+  register: fortress_tailscale_status
+
+- name: Read Tailnet Auth Key from VM Sibling SOPS File
+  ansible.builtin.command:
+    argv:
+      - sops
+      - --decrypt
+      - --extract
+      - "{{ fortress_vm.tailnet_subnet_router.auth_key_extract | default('[\"tailnet\"][\"auth_key\"][\"value\"]') }}"
+      - "{{ fortress_vm_sops_file }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: fortress_tailnet_auth_key
+  no_log: true
+  when: fortress_tailscale_status.rc != 0
+
+- name: Enroll Tailnet Subnet Router
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--auth-key={{ fortress_tailnet_auth_key.stdout | trim }}"
+      - "--advertise-routes={{ fortress_vm.tailnet_subnet_router.advertise_routes | join(',') }}"
+      - --accept-dns=false
+  changed_when: true
+  register: fortress_tailscale_up
+  no_log: true
+  when: fortress_tailscale_status.rc != 0
+
+- name: Ensure advertised fortress VLAN routes
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--advertise-routes={{ fortress_vm.tailnet_subnet_router.advertise_routes | join(',') }}"
+      - --accept-dns=false
+  changed_when: false
+  when: fortress_tailscale_status.rc == 0

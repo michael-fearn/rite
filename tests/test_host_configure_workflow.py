@@ -149,6 +149,9 @@ class HostConfigureWorkflowTests(unittest.TestCase):
         tasks = (REPO_ROOT / "ansible" / "roles" / "system_hygiene" / "tasks" / "main.yml").read_text()
 
         self.assertIn("libguestfs-tools", tasks)
+        self.assertIn("/var/lib/vz/snippets", tasks)
+        self.assertIn("pvesm set local --content", tasks)
+        self.assertIn(",snippets,", tasks)
 
     def test_proxmox_users_applies_acl_roles_to_token_principals(self):
         tasks = (REPO_ROOT / "ansible" / "roles" / "proxmox_users" / "tasks" / "main.yml").read_text()

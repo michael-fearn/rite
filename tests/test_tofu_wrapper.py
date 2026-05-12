@@ -120,6 +120,42 @@ class TofuWrapperTests(unittest.TestCase):
             self.assertIn('if vm_name == "media01"', partitions)
             self.assertNotIn('if vm.placement.host == "wintermute"', partitions)
 
+    def test_selected_vm_wrap_keeps_provider_coverage_for_hosts_already_in_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._wrapper_fixture(tmp)
+            host_dir = root / "inventory" / "hosts"
+            (host_dir / "straylight.yaml").write_text(
+                "proxmox:\n"
+                "  pve_node_name: straylight\n"
+                "network:\n"
+                "  management_address: 10.0.0.12\n"
+            )
+            (host_dir / "straylight.sops.yaml").write_text("encrypted straylight\n")
+            (root / "tofu" / "terraform.tfstate").write_text(
+                '{"resources":[{"provider":"provider[\\"registry.opentofu.org/bpg/proxmox\\"].straylight"}]}'
+            )
+            (host_dir / "neuromancer.sops.yaml").unlink()
+            env = self._fake_tools(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "tofu-wrap"), "destroy", "-var", "selected_vm=media01"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = calls_log.read_text()
+            self.assertIn("inventory/hosts/wintermute.sops.yaml", calls)
+            self.assertIn("inventory/hosts/straylight.sops.yaml", calls)
+            self.assertNotIn("inventory/hosts/neuromancer.sops.yaml", calls)
+            providers = (root / "tofu" / "generated-providers.tf").read_text()
+            self.assertIn('alias     = "wintermute"', providers)
+            self.assertIn('alias     = "straylight"', providers)
+            self.assertNotIn("neuromancer", providers)
+
     def test_wrap_fails_before_tofu_when_tofu_token_value_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, calls_log = self._wrapper_fixture(tmp)
@@ -185,6 +221,7 @@ class TofuWrapperTests(unittest.TestCase):
                 "    case \"$*\" in\n"
                 "      *wintermute.sops.yaml*) printf 'wintermute-secret\\n' ;;\n"
                 "      *neuromancer.sops.yaml*) printf 'neuromancer-secret\\n' ;;\n"
+                "      *straylight.sops.yaml*) printf 'straylight-secret\\n' ;;\n"
                 "      *) exit 1 ;;\n"
                 "    esac\n"
                 "    ;;\n"

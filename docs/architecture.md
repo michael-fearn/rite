@@ -435,13 +435,13 @@ Three steps, one logical operation. Wrapped by `just vm-up <vm>`.
 
 **Why three steps**: cloud-init needs the SSH public key at first boot (no shared-key trust transition for VMs the way there was for hosts — we're provisioning, so we can do it right the first time).
 
-1. **`vm-prepare.yml`**: refuse if SOPS file already exists. Generate ed25519 keypair on controller. Write private key to `<vm>.sops.yaml`. Write public key to `<vm>.yaml`'s `ssh_public_key:` field (plaintext — public keys aren't secret).
+1. **`vm-prepare.yml`**: refuse if the SOPS file already contains VM SSH key material. Generate ed25519 keypair on controller. Write private key to `<vm>.sops.yaml`, merging with any pre-existing non-SSH VM credentials. Write public key to `<vm>.yaml`'s `ssh_public_key:` field (plaintext — public keys aren't secret).
 2. **`tofu apply`** (via `tofu-wrap.sh`): reads `inventory/vms/*.yaml` via `for_each = fileset(...) + yamldecode()`, clones the cloud-init template, injects `ssh_public_key` and admin user via cloud-init userdata. Tofu never reads SOPS.
 3. **`vm-configure.yml`**: connects as the global admin user (default `admin`, NOPASSWD sudo, set in `group_vars/all.yaml`) with the per-VM private key from SOPS. First task: `wait_for_connection` with reasonable timeout (handles the gap between tofu returning and cloud-init completing). Then: VM admin user finalization, NFS mount setup, prep for service deploys.
 
 ### 9.3. Destruction (`vm-destroy.yml`)
 
-`just vm-destroy <vm>` → confirmation prompt → pre-flight checks (refuses if any `inventory/services/*.yaml` references the VM as `backend.vm`) → `tofu destroy -target=...` → delete the VM Sibling SOPS File after successful destroy. The VM yaml remains in the repo by default so the declared VM can be recreated or intentionally removed with `delete_vm_yaml=true`.
+`just vm-destroy <vm>` → confirmation prompt → pre-flight checks (refuses if any `inventory/services/*.yaml` references the VM as `backend.vm`) → `tofu destroy -target=...` with provider coverage for the selected VM's Host and any Host providers already referenced by state → delete the VM Sibling SOPS File after successful destroy. The VM yaml remains in the repo by default so the declared VM can be recreated or intentionally removed with `delete_vm_yaml=true`.
 
 ### 9.4. Connection model
 

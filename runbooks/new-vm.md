@@ -20,7 +20,7 @@ just vm-up vm=<name>
 
 The command is the operator path for the full VM lifecycle bring-up:
 
-1. Prepare generates the per-VM SSH keypair. Prepare refuses to run when inventory/vms/<vm>.sops.yaml already exists, because that Sibling SOPS File means VM private key material has already been minted.
+1. Prepare generates the per-VM SSH keypair. Prepare refuses to run when inventory/vms/<vm>.sops.yaml already contains VM SSH key material, because that means VM private key material has already been minted. A pre-existing VM Sibling SOPS File may contain other VM credentials, such as a Tailnet Auth Key; Prepare decrypts, merges the generated SSH key, and re-encrypts it.
 2. The VM public key is plaintext in inventory/vms/<vm>.yaml; the VM private key is encrypted in inventory/vms/<vm>.sops.yaml. Tofu reads the public key only. It never reads SOPS.
 3. `scripts/tofu-wrap plan -var selected_vm=<name>` shows the selected-VM OpenTofu plan targeted to that VM's cloud-init snippet and VM resources.
 4. Review the plan. Type `apply <name>` only when the plan creates or updates the intended VM.

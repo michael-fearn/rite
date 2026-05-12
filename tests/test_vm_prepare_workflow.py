@@ -30,10 +30,10 @@ class VMPrepareWorkflowTests(unittest.TestCase):
             self.assertIn("VM 'ghost' is not declared", result.stderr)
             self.assertFalse(calls_log.exists())
 
-    def test_vm_prepare_refuses_when_vm_sibling_sops_file_exists(self):
+    def test_vm_prepare_refuses_when_vm_sibling_sops_file_already_contains_vm_ssh_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, calls_log = self._prepare_fixture(tmp)
-            (root / "inventory" / "vms" / "demo01.sops.yaml").write_text("encrypted\n")
+            (root / "inventory" / "vms" / "demo01.sops.yaml").write_text("encrypted ssh\n")
             env = self._fake_tools(root, calls_log)
 
             result = subprocess.run(
@@ -46,8 +46,32 @@ class VMPrepareWorkflowTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 1)
-            self.assertIn("refusing to overwrite an existing VM Sibling SOPS File", result.stderr)
-            self.assertFalse(calls_log.exists())
+            self.assertIn("already contains a VM SSH key entry", result.stderr)
+            calls = calls_log.read_text()
+            self.assertIn('sops --decrypt --extract ["ssh_keys"]["bootstrap"]["private_key"]', calls)
+            self.assertNotIn("ssh-keygen", calls)
+
+    def test_vm_prepare_merges_generated_ssh_key_into_existing_non_ssh_sibling_sops_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._prepare_fixture(tmp)
+            (root / "inventory" / "vms" / "demo01.sops.yaml").write_text("encrypted tailnet\n")
+            env = self._fake_tools(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "vm-prepare"), "demo01"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            plaintext = (root / "last-plaintext.sops.yaml").read_text()
+            self.assertIn("tailnet:", plaintext)
+            self.assertIn("auth_key:", plaintext)
+            self.assertIn("ssh_keys:", plaintext)
+            self.assertIn("private_key: |", plaintext)
 
     def test_vm_prepare_writes_public_key_and_encrypted_sibling_sops_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,10 +135,20 @@ class VMPrepareWorkflowTests(unittest.TestCase):
         sops.write_text(
             "#!/usr/bin/env bash\n"
             "printf 'sops %s\\n' \"$*\" >> \"$CALLS_LOG\"\n"
+            "if [ \"$1\" = --decrypt ] && [ \"$2\" = --extract ]; then\n"
+            "  if grep -q 'encrypted ssh' \"${@: -1}\"; then printf 'PRIVATE KEY demo01\\n'; exit 0; fi\n"
+            "  exit 1\n"
+            "fi\n"
+            "if [ \"$1\" = --decrypt ]; then\n"
+            "  if grep -q 'encrypted tailnet' \"$2\"; then printf 'tailnet:\\n  auth_key:\\n    value: tskey-auth-example\\n'; exit 0; fi\n"
+            "  exit 1\n"
+            "fi\n"
+            "input=\"${@: -1}\"\n"
             "while [ $# -gt 0 ]; do\n"
             "  if [ \"$1\" = --output ]; then shift; output=\"$1\"; fi\n"
             "  shift\n"
             "done\n"
+            "cp \"$input\" \"$FORTRESS_ROOT/last-plaintext.sops.yaml\"\n"
             "printf 'encrypted vm sops\\n' > \"$output\"\n"
         )
         sops.chmod(sops.stat().st_mode | stat.S_IXUSR)

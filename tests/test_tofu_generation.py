@@ -110,6 +110,40 @@ class TofuGenerationTests(unittest.TestCase):
             self.assertIn('module "vms_wintermute"', partitions)
             self.assertNotIn("vms_neuromancer", partitions)
 
+    def test_selected_vm_generation_can_include_extra_provider_hosts_for_existing_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "hosts" / "straylight.yaml").write_text(
+                "proxmox:\n"
+                "  pve_node_name: pve-straylight\n"
+                "network:\n"
+                "  management_address: 10.0.0.12\n"
+            )
+
+            subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "tofu-generate"),
+                    str(root),
+                    "--selected-vm",
+                    "media01",
+                    "--provider-host",
+                    "straylight",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            providers = (root / "tofu" / "generated-providers.tf").read_text()
+            partitions = (root / "tofu" / "generated-vm-partitions.tf").read_text()
+            self.assertIn('alias     = "wintermute"', providers)
+            self.assertIn('alias     = "straylight"', providers)
+            self.assertIn('module "vms_wintermute"', partitions)
+            self.assertIn('module "vms_straylight"', partitions)
+            self.assertIn('if vm_name == "media01"', partitions)
+
     def test_selected_vm_generation_passes_only_the_selected_vm_to_the_host_partition(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

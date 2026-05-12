@@ -21,17 +21,23 @@ def main():
     if not vm_yaml.is_file():
         print(f"VM {vm!r} is not declared at {vm_yaml}", file=sys.stderr)
         return 1
+    existing_plaintext = None
     if vm_sops.exists():
-        print(
-            f"{vm_sops} already exists; refusing to overwrite an existing VM Sibling SOPS File.",
-            file=sys.stderr,
-        )
-        return 1
+        if _has_bootstrap_key_entry(vm_sops):
+            print(
+                f"{vm_sops} already contains a VM SSH key entry; use the VM SSH rotation workflow instead.",
+                file=sys.stderr,
+            )
+            return 1
+        existing_plaintext = _read_sops_plaintext(vm_sops)
+        if existing_plaintext is None:
+            print(f"failed to decrypt existing VM Sibling SOPS File at {vm_sops}", file=sys.stderr)
+            return 1
 
-    return run_prepare(repo_root, vm, vm_yaml, vm_sops)
+    return run_prepare(repo_root, vm, vm_yaml, vm_sops, existing_plaintext=existing_plaintext)
 
 
-def run_prepare(repo_root, vm, vm_yaml, vm_sops):
+def run_prepare(repo_root, vm, vm_yaml, vm_sops, existing_plaintext=None):
     created = _utc_timestamp()
     tmp_root = _tmpfs_root()
     with tempfile.TemporaryDirectory(prefix=f"vm-prepare-{vm}-", dir=tmp_root) as tmp:
@@ -56,7 +62,7 @@ def run_prepare(repo_root, vm, vm_yaml, vm_sops):
         )
         public_key = public_key_path.read_text().strip()
         _write_vm_public_key(vm_yaml, public_key)
-        _write_sops_plaintext(plaintext_sops, public_key, key_path, created)
+        _write_sops_plaintext(plaintext_sops, public_key, key_path, created, existing_plaintext=existing_plaintext)
         _run(
             [
                 "sops",
@@ -88,9 +94,9 @@ def _write_vm_public_key(vm_yaml, public_key):
     vm_yaml.write_text("\n".join(lines) + "\n")
 
 
-def _write_sops_plaintext(path, public_key, private_key_path, created):
+def _write_sops_plaintext(path, public_key, private_key_path, created, existing_plaintext=None):
     private_key = _indent_block(private_key_path.read_text().rstrip(), 6)
-    path.write_text(
+    ssh_block = (
         "ssh_keys:\n"
         "  bootstrap:\n"
         "    type: vm_ssh\n"
@@ -99,6 +105,32 @@ def _write_sops_plaintext(path, public_key, private_key_path, created):
         "    private_key: |\n"
         f"{private_key}\n"
     )
+    if existing_plaintext:
+        path.write_text(existing_plaintext.rstrip() + "\n\n" + ssh_block)
+        return
+    path.write_text(ssh_block)
+
+
+def _has_bootstrap_key_entry(vm_sops):
+    result = subprocess.run(
+        ["sops", "--decrypt", "--extract", '["ssh_keys"]["bootstrap"]["private_key"]', str(vm_sops)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _read_sops_plaintext(vm_sops):
+    result = subprocess.run(
+        ["sops", "--decrypt", str(vm_sops)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
 
 
 def _indent_block(value, spaces):

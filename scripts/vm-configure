@@ -34,7 +34,7 @@ def main():
             "--limit",
             vm,
             "--extra-vars",
-            json.dumps({"configure_vm": vm}),
+            json.dumps({"configure_vm": vm, "fortress_vm_sops_file": str(vm_sops)}),
         ],
         check=True,
     )

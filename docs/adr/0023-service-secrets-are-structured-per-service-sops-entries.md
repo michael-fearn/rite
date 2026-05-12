@@ -1,0 +1,3 @@
+# Service secrets are structured per-service SOPS entries
+
+Service Secrets live together in the Service's Sibling SOPS File as structured entries with `created`, `version`, and `value`. `service-deploy` preflights the decrypted SOPS shape before remote execution, rejects scalar legacy entries instead of carrying a compatibility path, then installs only the nested `value` as the Podman secret while keeping lifecycle metadata beside the secret for review and future rotation automation. This preserves the one-SOPS-file-per-Entity inventory pattern and rejects per-secret files and raw scalar secret values because they add ceremony or lose rotation context without improving the current recipient model.
