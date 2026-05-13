@@ -122,7 +122,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
     def test_service_hostnames_must_be_unique(self):
         self.assertIn("duplicate_service_hostname", self.codes_for("inventory_invalid/duplicate-hostname"))
 
-    def test_service_ingress_defaults_and_hostname_requirement(self):
+    def test_service_hostname_does_not_enable_ingress_implicitly(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
@@ -142,21 +142,73 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
             model = load_inventory_tree(root)
 
-            self.assertEqual(
-                {
-                    "enabled": True,
-                    "exposure": "lan_only",
-                    "tls": "letsencrypt_dns",
-                    "auth": {"type": "none"},
-                },
-                model.services["immich"]["ingress"],
-            )
+            self.assertEqual({"enabled": False}, model.services["immich"]["ingress"])
             self.assertNotIn("missing_ingress_hostname", {error.code for error in validate_inventory_tree(root)})
 
+    def test_service_ingress_block_requires_explicit_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "services" / "immich.yaml").write_text(
+                "name: immich\n"
+                "hostname: photos.fearn.cloud\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "ingress:\n"
+                "  exposure: lan_only\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+            )
+
+            self.assertIn("missing_service_ingress_enabled", {error.code for error in validate_inventory_tree(root)})
+
+    def test_service_hostname_requires_ingress_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", hostname="photos.fearn.cloud", ingress_enabled=False)
+
+            self.assertIn("service_hostname_without_ingress", {error.code for error in validate_inventory_tree(root)})
+
+    def test_lan_only_service_ingress_hostname_must_be_explicit_fqdn_under_fleet_domain(self):
+        invalid_hostnames = ["photos", "photos.example.com", "fearn.cloud", ".fearn.cloud", "photos..fearn.cloud"]
+        for hostname in invalid_hostnames:
+            with self.subTest(hostname=hostname), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+                self.write_fixture_service(root, "immich", hostname=hostname, ingress_enabled=True)
+
+                self.assertIn("service_ingress_hostname_not_fleet_fqdn", {error.code for error in validate_inventory_tree(root)})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", hostname="photos.fearn.cloud", ingress_enabled=True)
+
+            self.assertNotIn(
+                "service_ingress_hostname_not_fleet_fqdn",
+                {error.code for error in validate_inventory_tree(root)},
+            )
+
+    def test_service_ingress_defaults_and_hostname_requirement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            service_path = root / "inventory" / "services" / "immich.yaml"
             service_path.write_text(
-                service_path.read_text()
-                .replace("hostname: photos.fearn.cloud\n", "")
-                .replace("  containers:\n", "  containers:\n")
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
             )
 
             model = load_inventory_tree(root)
@@ -173,7 +225,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             root = Path(tmp)
             shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
             self.write_fixture_service(root, "immich", hostname="photos.fearn.cloud", ingress_enabled=True)
-            self.write_fixture_service(root, "photos", hostname="photos.fearn.cloud", ingress_enabled=False)
+            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", ingress_enabled=False)
 
             self.assertNotIn("duplicate_service_hostname", {error.code for error in validate_inventory_tree(root)})
 
@@ -203,6 +255,36 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
                 "missing_host_ingress_trusted_source_ranges",
                 {error.code for error in validate_inventory_tree(root)},
             )
+
+    def test_valid_host_ingress_route_uses_operator_host_name_and_management_address(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "group_vars" / "all.yaml").write_text(
+                "domain: fearn.cloud\n"
+                "nas:\n"
+                "  default_options:\n"
+                "    - nfsvers=4.2\n"
+                "ingress:\n"
+                "  trusted_source_ranges:\n"
+                "    - 10.20.0.0/24\n"
+            )
+            (root / "inventory" / "hosts" / "wintermute.yaml").write_text(
+                "proxmox:\n"
+                "  pve_node_name: pve-internal-name\n"
+                "  endpoint: https://pve-api.fearn.cloud:8006\n"
+                "network:\n"
+                "  management_address: 10.0.0.10\n"
+                "  bridges:\n"
+                "    - name: vmbr0\n"
+                "      managed: false\n"
+                "ingress:\n"
+                "  proxmox_web_ui:\n"
+                "    enabled: true\n"
+                "    hostname: wintermute.fearn.cloud\n"
+            )
+
+            self.assertEqual(validate_inventory_tree(root), [])
 
     def test_host_ingress_route_hostname_must_match_host_domain_name(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -377,6 +459,95 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             )
 
             self.assertIn("published_port_collision", {error.code for error in validate_inventory_tree(root)})
+
+    def test_ingress_published_port_must_be_exactly_one_tcp_capable_backend_port(self):
+        invalid_published_ports = [
+            [
+                "        - container: 2283\n",
+                "          protocol: udp\n",
+                "          ingress: true\n",
+            ],
+            [
+                "        - container: 2283\n",
+                "          ingress: true\n",
+                "        - host: 2283\n",
+                "          container: 8080\n",
+                "          protocol: tcp_udp\n",
+                "          ingress: true\n",
+            ],
+        ]
+        for published_ports in invalid_published_ports:
+            with self.subTest(published_ports=published_ports), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+                self.write_fixture_service(root, "immich", ingress_enabled=True, published_ports=published_ports)
+
+                self.assertIn("invalid_ingress_published_port", {error.code for error in validate_inventory_tree(root)})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=True,
+                published_ports=[
+                    "        - container: 2283\n",
+                    "          protocol: tcp_udp\n",
+                    "          ingress: true\n",
+                ],
+            )
+
+            self.assertNotIn("invalid_ingress_published_port", {error.code for error in validate_inventory_tree(root)})
+
+    def test_ingress_dns_target_requires_explicit_supported_dns_provider(self):
+        invalid_dns_capabilities = [
+            (
+                "dns:\n"
+                "  ingress_records:\n"
+                "    enabled: true\n",
+                "missing_ingress_dns_target_provider",
+            ),
+            (
+                "dns:\n"
+                "  provider: dnsmasq\n"
+                "  ingress_records:\n"
+                "    enabled: true\n",
+                "unsupported_ingress_dns_target_provider",
+            ),
+        ]
+        for dns_capability, expected_code in invalid_dns_capabilities:
+            with self.subTest(expected_code=expected_code), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+                self.write_fixture_service(
+                    root,
+                    "immich",
+                    ingress_enabled=False,
+                    hostname=None,
+                    extra_fields=dns_capability,
+                )
+
+                self.assertIn(expected_code, {error.code for error in validate_inventory_tree(root)})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                extra_fields=(
+                    "dns:\n"
+                    "  provider: pihole\n"
+                    "  ingress_records:\n"
+                    "    enabled: true\n"
+                ),
+            )
+
+            self.assertNotIn("missing_ingress_dns_target_provider", {error.code for error in validate_inventory_tree(root)})
+            self.assertNotIn("unsupported_ingress_dns_target_provider", {error.code for error in validate_inventory_tree(root)})
 
     def test_tcp_udp_published_ports_collide_with_tcp_and_udp_on_same_backend_vm(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -899,17 +1070,19 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
         vm="media01",
         port=2283,
         image="ghcr.io/immich-app/immich-server:v1.120.0",
-        ingress_enabled=None,
+        ingress_enabled=True,
         service_group=None,
         container_name="server",
         published_ports=None,
         depends_on=None,
         extra_containers=None,
+        extra_fields="",
     ):
         ingress = ""
         if ingress_enabled is not None:
             ingress = f"ingress:\n  enabled: {'true' if ingress_enabled else 'false'}\n"
         group = f"service_group: {service_group}\n" if service_group else ""
+        hostname_field = f"hostname: {hostname}\n" if hostname else ""
         ports = ""
         if published_ports is not None:
             ports = "      published_ports:\n" + "".join(published_ports)
@@ -925,11 +1098,12 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
         (root / "inventory" / "services" / f"{name}.yaml").write_text(
             f"name: {name}\n"
             f"{group}"
-            f"hostname: {hostname}\n"
+            f"{hostname_field}"
             "backend:\n"
             f"  vm: {vm}\n"
             f"  port: {port}\n"
             f"{ingress}"
+            f"{extra_fields}"
             "deploy:\n"
             "  type: quadlet\n"
             "  containers:\n"

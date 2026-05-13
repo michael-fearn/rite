@@ -54,6 +54,21 @@
         "gid": { "type": "integer", "minimum": 0 }
       }
     },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "enum": ["pihole"] },
+        "ingress_records": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
     "backend": {
       "type": "object",
       "additionalProperties": false,

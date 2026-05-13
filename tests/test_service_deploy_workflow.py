@@ -6,6 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from fortress_inventory.model import load_inventory_tree
+from fortress_services.deploy import quadlet_deploy_vars
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
@@ -359,6 +362,28 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
                 extra_vars["fortress_owned_quadlet_prune_paths"],
             )
             self.assertEqual("fortress_immich_", extra_vars["fortress_service_secret_prefix"])
+
+    def test_service_deploy_renders_pihole_dnsmasq_d_compatibility_for_ingress_dns_targets(self):
+        model = load_inventory_tree(REPO_ROOT)
+        service = model.services["dns-primary"]
+        vm = model.vms["dns-primary-vm"]
+
+        deploy_vars = quadlet_deploy_vars(service, vm, inventory_root=REPO_ROOT / "inventory")
+        pihole_artifact = next(
+            artifact
+            for artifact in deploy_vars["fortress_quadlet_artifacts"]
+            if artifact["filename"] == "fortress-dns-primary-pihole.container"
+        )
+
+        self.assertIn("Environment=FTLCONF_misc_etc_dnsmasq_d=true\n", pihole_artifact["content"])
+
+    def test_internal_ingress_service_deploy_scaffolding_imports_generated_routes(self):
+        caddyfile = (REPO_ROOT / "inventory" / "services" / "internal-ingress.native.d" / "Caddyfile.j2").read_text()
+
+        self.assertIn("admin {$CADDY_ADMIN}", caddyfile)
+        self.assertIn("import /etc/caddy/fortress/generated-routes.caddy", caddyfile)
+        self.assertNotIn("forgejo.fearn.cloud {", caddyfile)
+        self.assertNotIn("reverse_proxy 10.", caddyfile)
 
     def test_service_deploy_passes_native_package_repo_unit_and_config_files_to_playbook(self):
         with tempfile.TemporaryDirectory() as tmp:

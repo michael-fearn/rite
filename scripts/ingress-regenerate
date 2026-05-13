@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fortress_ingress.generate import render_caddyfile
+from fortress_ingress.generate import GENERATED_CADDY_ROUTES_PATH, render_caddy_routes, render_ingress_dns_record_sets
 from fortress_inventory.model import load_inventory_tree
 from fortress_inventory.validate import validate_inventory_model
 
 
 def main():
-    if len(sys.argv) != 1:
-        print("usage: scripts/ingress-regenerate", file=sys.stderr)
+    if sys.argv[1:] not in ([], ["--print"]):
+        print("usage: scripts/ingress-regenerate [--print]", file=sys.stderr)
         return 2
 
     repo_root = Path(os.environ.get("FORTRESS_ROOT", Path(__file__).resolve().parents[1]))
@@ -23,8 +24,70 @@ def main():
             print(f"{error.code}: {error.path}: {error.message}", file=sys.stderr)
         return 1
 
-    print(render_caddyfile(model), end="")
+    try:
+        caddy_routes = render_caddy_routes(model)
+        dns_record_sets = render_ingress_dns_record_sets(model)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    if sys.argv[1:] == ["--print"]:
+        print(caddy_routes, end="")
+        return 0
+
+    return regenerate_ingress(repo_root, model, caddy_routes, dns_record_sets)
+
+
+def regenerate_ingress(repo_root, model, caddy_routes, dns_record_sets):
+    ingress_vm = model.services["internal-ingress"]["backend"]["vm"]
+    if not _run_step(
+        repo_root,
+        f"push Caddy routes to {ingress_vm}",
+        ingress_vm,
+        ["sudo", "install", "-D", "-m", "0644", "/dev/stdin", GENERATED_CADDY_ROUTES_PATH],
+        stdin=caddy_routes,
+    ):
+        return 1
+    if not _run_step(
+        repo_root,
+        f"reload Caddy on {ingress_vm}",
+        ingress_vm,
+        ["sudo", "systemctl", "reload", "caddy"],
+    ):
+        return 1
+
+    for record_set in dns_record_sets:
+        service_name = record_set["service"]
+        vm = record_set["backend_vm"]
+        if not _run_step(
+            repo_root,
+            f"push Ingress DNS records for {service_name} to {vm}",
+            vm,
+            ["sudo", "install", "-D", "-m", "0644", "/dev/stdin", record_set["path"]],
+            stdin=record_set["content"],
+        ):
+            return 1
+        if not _run_step(
+            repo_root,
+            f"reload Pi-hole DNS for {service_name} on {vm}",
+            vm,
+            ["sudo", "podman", "exec", f"fortress-{service_name}-pihole", "pihole", "reloaddns"],
+        ):
+            return 1
+
     return 0
+
+
+def _run_step(repo_root, description, vm, command, stdin=""):
+    result = subprocess.run(
+        [str(repo_root / "scripts" / "vm-shell"), vm, "--", *command],
+        input=stdin,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+    print(f"failed: {description}", file=sys.stderr)
+    return False
 
 
 if __name__ == "__main__":

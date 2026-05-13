@@ -1,14 +1,18 @@
 name: dns-primary
-hostname: dns-primary.fearn.cloud
 service_group: dns-primary
 service_data_owner:
   uid: 1000
   gid: 1000
 backend:
   vm: dns-primary-vm
-  port: 53
+  port: 8080
+hostname: dns-primary.fearn.cloud
 ingress:
-  enabled: false
+  enabled: true
+dns:
+  provider: pihole
+  ingress_records:
+    enabled: true
 deploy:
   type: quadlet
   containers:
@@ -23,6 +27,7 @@ deploy:
         - bind: 0.0.0.0
           host: 8080
           container: 80
+          ingress: true
       env:
         TZ: UTC
         FTLCONF_dns_upstreams: unbound

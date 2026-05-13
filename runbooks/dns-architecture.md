@@ -48,9 +48,10 @@ FTLCONF_dns_listeningMode: all
 ```
 
 This keeps LAN-facing filtering and recursive resolution separate while still
-deploying them as one Service unit group. The Service has `ingress.enabled:
-false`; DNS traffic reaches the VM directly through firewall rule
-`DNS-001-ALLOW-INTERNAL-RESOLUTION`, not through Caddy.
+deploying them as one Service unit group. The Service enables Ingress for the
+Pi-hole web UI at `dns-primary.fearn.cloud`; DNS resolver traffic still reaches
+the VM directly through firewall rule `DNS-001-ALLOW-INTERNAL-RESOLUTION`, not
+through Caddy.
 
 `FTLCONF_dns_listeningMode: all` is required for Pi-hole v6 in this container
 topology so queries from routed LAN clients are accepted instead of being
@@ -80,9 +81,17 @@ not the password.
 - Host: `straylight`
 - VLAN: `VLAN 40`
 
-Pi-hole must listen on `10.40.0.11` for TCP and UDP port 53. The Pi-hole admin
-HTTP port is a direct administration surface during bootstrap and incident work,
-not a user-facing ingress route.
+Pi-hole must listen on `10.40.0.11` for TCP and UDP port 53. The Service Backend
+port is the Pi-hole web UI published port, `8080`, so Caddy routes
+`dns-primary.fearn.cloud` to the Pi-hole admin UI while resolver traffic remains
+direct TCP/UDP 53 access to the DNS VM.
+
+Because `dns-primary` is also the Pi-hole-backed Ingress DNS Target, Service
+Deploy enables Pi-hole v6 `/etc/dnsmasq.d` compatibility with
+`FTLCONF_misc_etc_dnsmasq_d=true`. Ingress Regeneration owns the generated DNS
+record file at `/etc/dnsmasq.d/99-fortress-ingress.conf`. That file is the
+fortress-owned Ingress DNS Record Set: it is authoritatively replaced from
+current Inventory and does not mutate Pi-hole manual records.
 
 The firewall model comes from `docs/firewall-matrix.md`:
 

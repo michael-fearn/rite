@@ -29,6 +29,8 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
             "secrets.web_api_password.value",
             "FTLCONF_dns_upstreams: unbound",
             "FTLCONF_dns_listeningMode: all",
+            "/etc/dnsmasq.d/99-fortress-ingress.conf",
+            "does not mutate Pi-hole manual records",
             "/srv/services/dns-primary/pihole/etc-pihole",
             "/srv/services/dns-primary/unbound",
             "dig @10.40.0.11 example.com A",

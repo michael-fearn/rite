@@ -20,6 +20,8 @@ def validate_inventory_tree(root, allow_ephemeral_datasets=False):
 def validate_inventory_model(model, allow_ephemeral_datasets=False):
     errors = []
     errors.extend(_validate_service_backends(model))
+    errors.extend(_validate_service_ingress_contract(model))
+    errors.extend(_validate_ingress_dns_targets(model))
     errors.extend(_validate_service_hostnames(model))
     errors.extend(_validate_host_ingress_routes(model))
     errors.extend(_validate_quadlet_services(model))
@@ -32,6 +34,56 @@ def validate_inventory_model(model, allow_ephemeral_datasets=False):
     errors.extend(_validate_dataset_lifecycle_policy(model, allow_ephemeral_datasets=allow_ephemeral_datasets))
     errors.extend(_validate_vm_mounts(model))
     errors.extend(_validate_vm_host_resources(model))
+    return errors
+
+
+def _validate_service_ingress_contract(model):
+    errors = []
+    for service_name, service in model.services.items():
+        ingress = service.get("ingress")
+        if isinstance(ingress, dict) and "enabled" not in ingress:
+            errors.append(
+                ValidationError(
+                    "missing_service_ingress_enabled",
+                    f"inventory/services/{service_name}.yaml.ingress.enabled",
+                    f"Service {service_name} declares Ingress but does not declare ingress.enabled",
+                )
+            )
+        if service.get("hostname") and not service.get("ingress", {}).get("enabled"):
+            errors.append(
+                ValidationError(
+                    "service_hostname_without_ingress",
+                    f"inventory/services/{service_name}.yaml.hostname",
+                    f"Service {service_name} declares a hostname but does not enable Ingress",
+                )
+            )
+    return errors
+
+
+def _validate_ingress_dns_targets(model):
+    errors = []
+    for service_name, service in model.services.items():
+        dns = service.get("dns") or {}
+        if not dns.get("ingress_records", {}).get("enabled"):
+            continue
+        provider = dns.get("provider")
+        if not provider:
+            errors.append(
+                ValidationError(
+                    "missing_ingress_dns_target_provider",
+                    f"inventory/services/{service_name}.yaml.dns.provider",
+                    f"Service {service_name} enables Ingress DNS Records but does not declare dns.provider",
+                )
+            )
+            continue
+        if provider != "pihole":
+            errors.append(
+                ValidationError(
+                    "unsupported_ingress_dns_target_provider",
+                    f"inventory/services/{service_name}.yaml.dns.provider",
+                    f"Service {service_name} declares unsupported Ingress DNS Target provider {provider}",
+                )
+            )
     return errors
 
 
@@ -162,12 +214,16 @@ def _validate_published_ports(model):
             continue
         backend_vm_name = backend.get("vm")
         backend_port = backend.get("port")
-        ingress_backend_seen = False
+        ingress_backend_matches = []
         for container_index, container, port_index, published_port in _service_published_ports(service):
             host_port = published_port.get("host", published_port.get("container"))
             protocol = published_port.get("protocol", "tcp")
-            if published_port.get("ingress") is True and host_port == backend_port:
-                ingress_backend_seen = True
+            if (
+                published_port.get("ingress") is True
+                and host_port == backend_port
+                and "tcp" in _published_port_protocols(protocol)
+            ):
+                ingress_backend_matches.append((container_index, port_index))
             if backend_vm_name and host_port:
                 for protocol_part in _published_port_protocols(protocol):
                     key = (backend_vm_name, host_port, protocol_part)
@@ -183,15 +239,25 @@ def _validate_published_ports(model):
                         )
                     else:
                         seen[key] = (service_name, container_index, port_index)
-        if service.get("ingress", {}).get("enabled") and backend_port and not ingress_backend_seen:
-            errors.append(
-                ValidationError(
-                    "missing_ingress_published_port",
-                    f"inventory/services/{service_name}.yaml.backend.port",
-                    f"Service {service_name} enables Ingress but no Published Port explicitly marks "
-                    f"Backend port {backend_port} with ingress: true",
+        if service.get("ingress", {}).get("enabled") and backend_port:
+            if len(ingress_backend_matches) != 1:
+                errors.append(
+                    ValidationError(
+                        "invalid_ingress_published_port",
+                        f"inventory/services/{service_name}.yaml.backend.port",
+                        f"Service {service_name} enables Ingress but must have exactly one TCP-capable "
+                        f"Published Port marked for Ingress on Backend port {backend_port}",
+                    )
                 )
-            )
+            if not ingress_backend_matches:
+                errors.append(
+                    ValidationError(
+                        "missing_ingress_published_port",
+                        f"inventory/services/{service_name}.yaml.backend.port",
+                        f"Service {service_name} enables Ingress but no Published Port explicitly marks "
+                        f"Backend port {backend_port} with ingress: true",
+                    )
+                )
     return errors
 
 
@@ -425,6 +491,7 @@ def _service_secret_path(service_name, container_index, secret_index, field):
 def _validate_service_hostnames(model):
     errors = []
     seen = {}
+    domain = model.globals.get("domain")
     for service_name, service in model.services.items():
         if service.get("ingress", {}).get("enabled") and not service.get("hostname"):
             errors.append(
@@ -438,6 +505,14 @@ def _validate_service_hostnames(model):
         if not service.get("ingress", {}).get("enabled"):
             continue
         hostname = service.get("hostname")
+        if service.get("ingress", {}).get("exposure") == "lan_only" and domain and not _hostname_is_under_domain(hostname, domain):
+            errors.append(
+                ValidationError(
+                    "service_ingress_hostname_not_fleet_fqdn",
+                    f"inventory/services/{service_name}.yaml.hostname",
+                    f"LAN-only Service Ingress hostname {hostname} must be an explicit FQDN under {domain}",
+                )
+            )
         if hostname in seen:
             errors.append(
                 ValidationError(
@@ -449,6 +524,13 @@ def _validate_service_hostnames(model):
         else:
             seen[hostname] = service_name
     return errors
+
+
+def _hostname_is_under_domain(hostname, domain):
+    if not isinstance(hostname, str) or not hostname.endswith(f".{domain}"):
+        return False
+    labels = hostname.split(".")
+    return all(labels) and len(labels) > len(domain.split("."))
 
 
 def _validate_host_ingress_routes(model):

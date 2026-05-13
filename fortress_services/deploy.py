@@ -1,5 +1,6 @@
 import json
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 from pathlib import PurePosixPath
 
@@ -96,6 +97,7 @@ def preflight_service_secret_shape(service_name, service_sops_path, secret_keys)
 
 
 def quadlet_deploy_vars(service, vm, inventory_root=None):
+    service = _service_with_deploy_capability_setup(service)
     rendered = render_quadlet_service(service, vm, inventory_root=inventory_root)
     start_units = service_start_units(service)
     network_units = quadlet_network_units(rendered.artifacts)
@@ -122,6 +124,24 @@ def quadlet_deploy_vars(service, vm, inventory_root=None):
         ],
         "fortress_service_secret_prefix": f"fortress_{service['name']}_",
     }
+
+
+def _service_with_deploy_capability_setup(service):
+    if not _needs_pihole_dnsmasq_d_compatibility(service):
+        return service
+    service = deepcopy(service)
+    for container in service.get("deploy", {}).get("containers", []) or []:
+        if container.get("name") != "pihole":
+            continue
+        env = container.setdefault("env", {})
+        env.setdefault("FTLCONF_misc_etc_dnsmasq_d", True)
+        break
+    return service
+
+
+def _needs_pihole_dnsmasq_d_compatibility(service):
+    dns = service.get("dns") or {}
+    return dns.get("provider") == "pihole" and dns.get("ingress_records", {}).get("enabled") is True
 
 
 def native_deploy_vars(service, globals_, inventory_root=None):

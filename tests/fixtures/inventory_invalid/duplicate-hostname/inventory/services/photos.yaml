@@ -3,6 +3,8 @@ hostname: photos.fearn.cloud
 backend:
   vm: media01
   port: 2284
+ingress:
+  enabled: true
 deploy:
   type: quadlet
   containers:
