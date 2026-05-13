@@ -112,7 +112,7 @@ def render_quadlet_container(service, vm, container):
     for secret in container.get("secrets", []) or []:
         secret_name = _service_secret_name(service, secret)
         lines.append(f"Secret={secret_name}")
-        lines.append(f"Environment={secret['env']}=/run/secrets/{secret_name}")
+        lines.append(f"Environment={secret['env']}={_service_secret_env_value(secret_name, secret)}")
 
     for volume in container.get("volumes", []) or []:
         if volume.get("mount"):
@@ -201,6 +201,12 @@ def _quadlet_env_value(value):
 
 def _service_secret_name(service, secret):
     return f"fortress_{service['name']}_{_service_secret_key(secret)}"
+
+
+def _service_secret_env_value(secret_name, secret):
+    if secret.get("env_value") == "secret_name":
+        return secret_name
+    return f"/run/secrets/{secret_name}"
 
 
 def _service_secret_key(secret):

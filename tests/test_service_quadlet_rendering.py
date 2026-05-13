@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fortress_inventory.model import load_inventory_tree
 from fortress_services.quadlet import render_quadlet_container, render_quadlet_service
 
 
@@ -263,6 +264,25 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
         self.assertIn("PublishPort=0.0.0.0:53:53/tcp\n", container.content)
         self.assertIn("PublishPort=0.0.0.0:53:53/udp\n", container.content)
         self.assertNotIn("tcp,udp", container.content)
+
+    def test_dns_primary_pihole_receives_web_api_password_file_secret(self):
+        service = load_inventory_tree(REPO_ROOT).services["dns-primary"]
+
+        rendered = render_quadlet_service(service, {})
+        container = rendered.artifacts_by_filename["fortress-dns-primary-pihole.container"]
+
+        self.assertIn("Secret=fortress_dns-primary_web_api_password\n", container.content)
+        self.assertIn(
+            "Environment=WEBPASSWORD_FILE=fortress_dns-primary_web_api_password\n",
+            container.content,
+        )
+        self.assertNotIn(
+            "Environment=WEBPASSWORD_FILE=/run/secrets/fortress_dns-primary_web_api_password\n",
+            container.content,
+        )
+        self.assertNotIn("created:", container.content)
+        self.assertNotIn("version:", container.content)
+        self.assertNotIn("value:", container.content)
 
     def test_container_renders_non_secret_env_and_service_secret_file_env(self):
         service = {

@@ -1,4 +1,5 @@
 name: dns-primary
+hostname: dns-primary.fearn.cloud
 service_group: dns-primary
 service_data_owner:
   uid: 1000
@@ -26,6 +27,10 @@ deploy:
         TZ: UTC
         FTLCONF_dns_upstreams: unbound
         FTLCONF_dns_listeningMode: all
+      secrets:
+        - secret: secrets.web_api_password
+          env: WEBPASSWORD_FILE
+          env_value: secret_name
       volumes:
         - service_path: pihole/etc-pihole
           container: /etc/pihole

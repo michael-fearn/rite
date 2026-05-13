@@ -34,7 +34,7 @@ deploy:
       env:
         DB_HOSTNAME: immich-postgres
       secrets:
-        - secret: db_password
+        - secret: secrets.db_password
           env: DB_PASSWORD_FILE
       depends_on: [postgres]
     - name: postgres

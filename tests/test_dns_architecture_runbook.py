@@ -19,9 +19,14 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
             "VLAN 40",
             "inventory/vms/dns-primary-vm.yaml",
             "inventory/services/dns-primary.yaml",
+            "inventory/services/dns-primary.sops.yaml",
             "scripts/vm-up dns-primary-vm",
             "scripts/service-deploy dns-primary",
             "TCP and UDP port 53",
+            "WEBPASSWORD_FILE",
+            "env_value: secret_name",
+            "secret name",
+            "secrets.web_api_password.value",
             "FTLCONF_dns_upstreams: unbound",
             "FTLCONF_dns_listeningMode: all",
             "/srv/services/dns-primary/pihole/etc-pihole",
@@ -45,6 +50,23 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
         self.assertIn("fortress-dns-primary-unbound.container", content)
         self.assertIn("fortress-dns-primary-pihole.service", content)
         self.assertIn("fortress-dns-primary-unbound.service", content)
+
+    def test_dns_primary_service_secret_sibling_sops_file_is_structured_and_encrypted(self):
+        sops_file = REPO_ROOT / "inventory" / "services" / "dns-primary.sops.yaml"
+
+        self.assertTrue(sops_file.is_file())
+        content = sops_file.read_text()
+        for phrase in [
+            "secrets:",
+            "web_api_password:",
+            "created:",
+            "version:",
+            "value:",
+            "sops:",
+            "ENC[AES256_GCM",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, content)
 
 
 if __name__ == "__main__":

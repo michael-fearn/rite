@@ -31,7 +31,19 @@ Use `source: /` to mount the root of the existing Backend VM Mount, or a relativ
 
 ## Secrets And Fragments
 
-A Service Secret is declared on a container with `secret` and `env`. The value comes from `inventory/services/<service>.sops.yaml`; `service-deploy` installs it as a Podman secret and sets the declared `_FILE` environment variable to `/run/secrets/<podman-secret>`.
+A Service Secret is declared on a container with `secret` and `env`. The value comes from `inventory/services/<service>.sops.yaml`; `service-deploy` installs it as a Podman secret and sets the declared `_FILE` environment variable to `/run/secrets/<podman-secret>`. If an image expects the Docker/Podman secret name instead of a path, declare `env_value: secret_name`; the default is `env_value: file_path`.
+
+Service Secrets use structured entries in the Service Sibling SOPS File. Store
+the secret bytes under `secrets.<purpose>.value` and keep `created` and
+`version` metadata beside it:
+
+```yaml
+secrets:
+  demo_password:
+    created: 2026-05-12T00:00:00Z
+    version: 1
+    value: "<secret bytes>"
+```
 
 Quadlet Fragment files live under `inventory/services/<service>.quadlet.d/`. Use `network.network` for the generated network artifact or `<container>.container` for a generated container artifact. Fragments are for native Quadlet options fortress does not model directly; validation refuses unknown fragment files and fortress-owned invariants.
 

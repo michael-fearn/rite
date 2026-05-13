@@ -25,6 +25,12 @@ class NewServiceRunbookTests(unittest.TestCase):
             "Service-owned volume",
             "Share-backed Volume",
             "Service Secret",
+            "created",
+            "version",
+            "value",
+            "secrets.<purpose>.value",
+            "env_value: secret_name",
+            "env_value: file_path",
             "Quadlet Fragment",
             "Service Data Owner",
             "existing Backend VM Mount",
@@ -146,6 +152,17 @@ class NewServiceRunbookTests(unittest.TestCase):
         self.assertIn("Volume=/mnt/nfs-demo:/mnt/shared:rw\n", web.content)
         self.assertIn("Notify=false\n", web.content)
         self.assertIn("RestartSec=5\n", web.content)
+
+    def test_acceptance_demo_service_secret_example_uses_structured_shape(self):
+        example = REPO_ROOT / "inventory" / "acceptance" / "service-demo.sops.yaml.example"
+
+        self.assertTrue(example.is_file())
+        content = example.read_text()
+        self.assertIn("secrets:\n", content)
+        self.assertIn("demo_password:\n", content)
+        self.assertIn("created: 2026-05-12T00:00:00Z\n", content)
+        self.assertIn("version: 1\n", content)
+        self.assertIn("value:", content)
 
 
 if __name__ == "__main__":

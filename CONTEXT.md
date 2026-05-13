@@ -184,6 +184,10 @@ _Avoid_: VM Reconcile, VM sync.
 The Service workflow that converges one declared Service's VM-local runtime artifacts and running units.
 _Avoid_: Service Reconcile, app deploy.
 
+**Ingress Regeneration**:
+The operator workflow that regenerates and reloads Ingress routing and Ingress DNS Records from current Inventory.
+_Avoid_: Service Deploy, DNS deploy.
+
 **NAS Reconcile**:
 An operator workflow that validates declared Datasets and converges derived Shares without deleting ordinary Dataset contents.
 _Avoid_: configure NAS, sync shares.
@@ -251,6 +255,30 @@ _Avoid_: bare-metal (the VM is still a VM); package install.
 **Ingress**:
 The VM named `internal-ingress-vm`, placed on the `straylight` Host, that terminates TLS and reverse-proxies internal HTTP traffic to backing Services.
 _Avoid_: edge, gateway, proxy (reserve "proxy" for the verb).
+
+**Ingress DNS Record**:
+A DNS VM local IPv4 A record for an Ingress route hostname that resolves to the Ingress VM address.
+_Avoid_: Backend DNS record, wildcard record, CNAME.
+
+**Ingress DNS Record Set**:
+The fortress-owned generated-file set of Ingress DNS Records applied to DNS Services during ingress regeneration.
+_Avoid_: manual Pi-hole records, ad hoc DNS entries.
+
+**Ingress DNS Target**:
+A DNS Service-level declaration that receives the generated Ingress DNS Record Set during Ingress Regeneration.
+_Avoid_: DNS peer, DNS VM target.
+
+**Host Ingress Route**:
+A management-plane Ingress route from a hostname to a physical Host's management address and web UI port.
+_Avoid_: Service, Backend, VM route.
+
+**DNS Capability**:
+A Service-level DNS behavior declaration on a DNS Service, such as accepting generated Ingress DNS Records.
+_Avoid_: VM role, inferred DNS feature.
+
+**Pi-hole-backed DNS Service**:
+A DNS Service whose supported provider for generated DNS records is Pi-hole.
+_Avoid_: arbitrary dnsmasq host, generic file target.
 
 **DNS VM**:
 An Infrastructure VLAN VM that runs Pi-hole and Unbound as a complete internal resolver.
@@ -440,6 +468,8 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Ingress** is HTTP-family routing only; non-HTTP Published Ports are exposed directly on the **Backend** VM rather than through Caddy.
 - A **Published Port** must opt into **Ingress** routing explicitly; direct VM exposure is deliberate through its bind address.
 - A **Published Port** bound to `0.0.0.0` is an explicit direct VM exposure to all VM interfaces.
+- An **Ingress**-enabled Quadlet **Service** has exactly one TCP-capable **Published Port** marked for **Ingress** whose host port equals the **Backend** port.
+- An **Ingress**-backed **Published Port** must bind to an address reachable from the **Ingress** **VM**; loopback binding is only for same-VM callers.
 - A Service-layer **Acceptance Test** must prove direct **Published Port** reachability from the **Peer Acceptance VM** to the **Primary Acceptance VM**.
 - A Service-layer **Acceptance Test** proves direct reachability through the tested **Service**'s **Backend** port, not through a separate test-only Published Port.
 - A Service-layer **Acceptance Test** may additionally prove **Ingress** hostname reachability when the tested **Service** declares **Ingress**.
@@ -462,8 +492,56 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Container Alias** must be unique within its Podman network; rendered container identity remains service-scoped as `<service>-<container>`.
 - Fortress-owned runtime artifacts use a `fortress-` prefix; Podman container and systemd unit identity is `fortress-<service>-<container>`, while the **Container Alias** remains the declared container name.
 - The **Ingress** **VM** routes traffic to **Services** by hostname.
+- **Ingress** routes are hostname-only; path-based routing is deferred.
+- The **Ingress** reverse-proxies each **Service** to its **Backend** **VM**'s declared static address and **Backend** port.
+- A **Host Ingress Route** reverse-proxies to a physical **Host** management address rather than to a **Service** **Backend**.
+- **Host Ingress Routes** are declared on Host inventory, not Service inventory.
+- A **Host Ingress Route** must be explicitly enabled per **Host**; Host existence alone does not create management ingress.
+- A Proxmox web UI **Host Ingress Route** hostname is explicitly written in Host inventory and must equal `<host>.<domain>` using the operator-facing **Host** name.
+- A Proxmox web UI **Host Ingress Route** targets the Host's `network.management_address` and defaults to TCP port 8006.
+- A **Host Ingress Route** must not derive its target from `proxmox.endpoint`.
+- `proxmox.endpoint` remains a direct management/API endpoint for automation; **Host Ingress Routes** are for operator browser access and must not become a dependency of OpenTofu or Ansible workflows.
+- A Proxmox web UI **Host Ingress Route** defaults to Trusted-only exposure, Let's Encrypt DNS-01 TLS, and no additional Ingress Auth.
+- Caddy enforces Trusted-only access for Proxmox web UI **Host Ingress Routes** at the route level, because ordinary Service routes and Host management routes share the same **Ingress** **VM** address.
+- Trusted-only **Host Ingress Route** source ranges are declared policy in **Inventory**, not hardcoded in the generator.
+- Known, IoT, Guest, and DMZ clients must not reach Proxmox web UI **Host Ingress Routes** through the **Ingress**.
+- A Proxmox web UI **Host Ingress Route** relies on Proxmox authentication for the first slice; additional **Ingress Auth** for Host management is deferred.
+- **Ingress** terminates TLS and proxies to **Backends** and Proxmox web UI **Host Ingress Routes** over plain HTTP unless a future backend transport model says otherwise.
+- **Ingress Regeneration** requires unambiguous static IPv4 addresses for the **Ingress** **VM** and every **Backend** **VM** it routes to.
+- **Ingress** TLS for internal Service hostnames uses Let's Encrypt DNS-01 when `ingress.tls` is `letsencrypt_dns`.
 - A **Service** needs a hostname only when **Ingress** is enabled.
+- A **Service** must declare `ingress.enabled: true` explicitly to enable **Ingress**; a hostname alone does not enable **Ingress**.
+- A **Service** that declares an `ingress` block must declare `ingress.enabled` explicitly.
+- A **Service** must not declare a hostname when **Ingress** is disabled.
+- A LAN-only **Ingress** hostname must be an explicit FQDN under the configured fleet domain.
+- An **Ingress**-enabled **Service** defaults to LAN-only **Exposure**, Let's Encrypt DNS-01 TLS, and no **Ingress Auth** when those policy fields are omitted.
+- When a mixed-protocol **Service** enables **Ingress**, its **Backend** port is the HTTP-family port used by **Ingress**; non-HTTP **Published Ports** remain direct VM exposure.
+- **Ingress DNS Records** are generated only for **Services** with **Ingress** enabled.
+- **Ingress DNS Records** are also generated for declared **Host Ingress Routes**.
+- **Ingress DNS Records** are not generated for VMs merely because they exist, including the **Ingress** **VM** itself.
+- The internal **Ingress DNS Record Set** includes only **Services** whose **Exposure** is `lan_only`.
+- **Service** hostnames and **Host Ingress Route** hostnames share one generated **Ingress** hostname namespace and must not collide.
+- **Ingress DNS Records** are generated per declared **Service** hostname; fortress does not create a wildcard internal record by default.
+- **Ingress DNS Records** are IPv4 A records; IPv6 records are deferred until IPv6 VM addressing is modeled.
+- An **Ingress DNS Record** points to the **Ingress** **VM**, not the route's target **Backend** **VM** or **Host**.
+- The **Ingress DNS Record** target address is derived from the **Ingress** **VM** declaration in **Inventory**.
+- **Ingress DNS Records** are applied to explicitly declared **Ingress DNS Targets**, not inferred from **DNS VM** names.
+- An **Ingress DNS Target** is declared through a DNS **Capability** on a DNS **Service**.
+- A DNS **Capability** declares its DNS provider explicitly; provider inference from Service names or container images is forbidden.
+- The first supported **Ingress DNS Target** provider is a **Pi-hole-backed DNS Service**.
+- Ingress regeneration authoritatively replaces the **Ingress DNS Record Set** from current **Inventory**, including removing stale generated records.
+- The **Ingress DNS Record Set** must not include or delete manual records outside the fortress-owned generated surface.
+- The **Ingress DNS Record Set** is rendered as a fortress-owned DNS configuration file on each **Ingress DNS Target**, rather than mutated through the Pi-hole API.
+- Pi-hole-backed DNS **Services** use the `/etc/dnsmasq.d` compatibility surface for the **Ingress DNS Record Set**.
+- A **Pi-hole-backed DNS Service** with Ingress DNS Records enabled implicitly requires `/etc/dnsmasq.d` compatibility during **Service Deploy**; **Ingress Regeneration** only writes and reloads the generated DNS file.
+- Generated **Ingress** routes and **Ingress DNS Records** are ordered deterministically by route hostname.
+- Absent planned DNS peers do not block regeneration.
+- **Ingress Regeneration** updates and reloads generated routing and DNS files; it does not perform **Service Deploy** for the **Ingress** or DNS **Services**.
+- **Service Deploy** owns stable **Ingress** installation and Caddy scaffolding; **Ingress Regeneration** owns the generated Caddy routes imported by that scaffolding.
+- **Ingress Regeneration** is non-transactional but succeeds only when every targeted **Ingress** and DNS reload succeeds.
+- Static validation proves **Ingress DNS Targets** are well-formed in **Inventory**; **Ingress Regeneration** proves live reachability and reload success.
 - **Ingress Auth** is explicit per **Service** and is not applied globally by default.
+- Current **Ingress Regeneration** supports only **Ingress Auth** type `none`; Authentik-backed route generation is deferred until that contract is modeled.
 - The **Ingress** performs internal HTTP routing and TLS termination; the **Identity VM** does not replace the **Ingress**.
 - The **Identity VM** provides **Ingress Auth** only for **Services** that explicitly declare it.
 - The **Identity VM** is reached through the **Ingress** for normal Authentik user and admin flows.
@@ -479,6 +557,9 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Service Secret** stores its secret bytes under `value` and records `created` and `version` metadata alongside that value.
 - A **Service Secret** name describes its purpose in fortress language, not the Service application's environment variable name.
 - The Pi-hole web/API password for `dns-primary` is represented as the `web_api_password` **Service Secret**.
+- The `dns-primary.fearn.cloud` hostname reaches the Pi-hole web UI through the **Ingress**; DNS resolver traffic to `dns-primary` remains direct TCP/UDP port 53 access to the **DNS VM**.
+- **Ingress Regeneration** includes `dns-primary.fearn.cloud` in generated **Ingress** routes and **Ingress DNS Records** when `dns-primary` declares **Ingress**.
+- `dns-primary` is both an **Ingress DNS Target** and an **Ingress**-enabled **Service** for its Pi-hole web UI.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
 - A **NAS Endpoint** is an **Entity**.
 - A **NAS Endpoint** has zero or more **Datasets**.
@@ -554,7 +635,10 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **"node" vs "host"**: In Proxmox parlance "node" is a cluster member; here we have no cluster, so "node" only ever means the PVE-internal identity (`pve_node_name`). All operator prose uses **Host**.
 - **"template"**: Overloaded between the **Template** (a Proxmox VM marked `template: 1`), the `vm-templates/<name>.yaml` recipe that produces it, and Jinja templates inside Ansible roles. The first two are the same concept at recipe and instance layers; Jinja templates should always be qualified ("Jinja template" or "config template").
 - **"service"**: Overloaded with "systemd service unit". A **Service** in this project is a deployed app (one yaml under `inventory/services/`); a systemd service unit is always qualified as "systemd unit".
-- **Hostname conventions**: A **Service**'s `hostname` is the end-user FQDN (`photos.fearn.cloud`); a **VM**'s `cloud_init.hostname` is the short form (`web01`), with FQDN derived as `<short>.fearn.cloud`; a **Container Alias** is private Podman network DNS. The split is intentional, but easy to reverse by accident.
+- **Hostname conventions**: A **Service**'s `hostname` is the Ingress-only end-user FQDN (`photos.fearn.cloud`); a **VM**'s `cloud_init.hostname` is the short form (`web01`), with FQDN derived as `<short>.fearn.cloud`; a **Container Alias** is private Podman network DNS. The split is intentional, but easy to reverse by accident.
+- **Non-Ingress Service names**: Deferred. A non-Ingress **Service** must not use `hostname`; direct DNS names for non-HTTP or administration surfaces need a separate modeled concept later.
+- **Multi-address Ingress VM**: Deferred. The **Ingress DNS Record** target address is unambiguous while the **Ingress** **VM** has one client-facing static address; explicit address selection belongs in a later model if the **Ingress** **VM** gains multiple client-facing addresses.
+- **Ingress health name**: Deferred. A dedicated health-check hostname would need its own explicit route concept; it is not implied by the **Ingress** **VM** existing.
 - **`ingress.exposure` enum**: Only `lan_only` appears in [docs/architecture.md](docs/architecture.md). Whether `internet_exposed` (or similar) is a planned value, and what it would imply for the Caddy/Cloudflare wiring, is unresolved.
 - **`ingress.auth` enum**: The Firewall Matrix requires **File Browser** to use **Ingress Auth**, but the current Service schema only accepts `auth.type: none`. Inventory may temporarily encode the Service as unauthenticated while preserving the policy gap here.
 - **Multi-VM Backend**: Deferred. A **Service** has exactly one **Backend** for the initial Quadlet and Ingress implementation; HA Backend semantics will be designed when the Ingress supports multiple Backends.

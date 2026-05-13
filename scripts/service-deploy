@@ -10,9 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fortress_inventory.model import load_inventory_tree
 from fortress_inventory.validate import validate_inventory_model
 from fortress_services.deploy import (
+    ServiceSecretPreflightError,
     native_deploy_vars,
+    preflight_service_secret_shape,
     quadlet_deploy_vars,
     service_secret_installations,
+    service_secret_keys,
     share_backed_volume_subpaths,
 )
 
@@ -47,6 +50,7 @@ def main():
         print(f"VM Sibling SOPS File is required at {vm_sops}. Run VM Prepare first.", file=sys.stderr)
         return 1
 
+    secret_keys = service_secret_keys(service)
     service_secrets = service_secret_installations(service)
     service_sops = repo_root / "inventory" / "services" / f"{service_name}.sops.yaml"
     if service_secrets and not service_sops.is_file():
@@ -56,6 +60,12 @@ def main():
             file=sys.stderr,
         )
         return 1
+    if service_secrets:
+        try:
+            preflight_service_secret_shape(service_name, service_sops, secret_keys)
+        except ServiceSecretPreflightError as error:
+            print(f"Fortress Service Secret preflight failed: {error}", file=sys.stderr)
+            return 1
 
     extra_vars = {
         "deploy_service": service_name,

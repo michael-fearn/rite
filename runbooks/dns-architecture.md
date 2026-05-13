@@ -5,6 +5,7 @@ at `10.40.0.11` in `VLAN 40` and is declared by:
 
 - `inventory/vms/dns-primary-vm.yaml`
 - `inventory/services/dns-primary.yaml`
+- `inventory/services/dns-primary.sops.yaml`
 
 The VM is provisioned through the standard VM lifecycle path:
 
@@ -54,6 +55,21 @@ false`; DNS traffic reaches the VM directly through firewall rule
 `FTLCONF_dns_listeningMode: all` is required for Pi-hole v6 in this container
 topology so queries from routed LAN clients are accepted instead of being
 treated as non-local Docker-network traffic.
+
+## Pi-hole web/API password
+
+The Pi-hole admin web/API password is a Service Secret in the Service Sibling
+SOPS File at `inventory/services/dns-primary.sops.yaml`. The structured entry is
+stored at `secrets.web_api_password.value` with `created` and `version` metadata
+beside it.
+
+The `dns-primary` Service declaration maps that Fortress purpose name to
+Pi-hole's native `WEBPASSWORD_FILE` environment variable. `service-deploy`
+installs only the nested `value` bytes as the Podman secret. Pi-hole's v6
+container expects `WEBPASSWORD_FILE` to contain the secret name and then reads
+`/run/secrets/$WEBPASSWORD_FILE`, so `dns-primary` declares
+`env_value: secret_name`. The rendered Quadlet contains the Podman secret name,
+not the password.
 
 ## Addressing and ports
 

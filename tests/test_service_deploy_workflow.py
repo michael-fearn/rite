@@ -106,7 +106,17 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             self.assertIn("Service Sibling SOPS File is required", missing.stderr)
 
             service_sops = root / "inventory" / "services" / "immich.sops.yaml"
-            service_sops.write_text("secrets:\n  db_password: encrypted\n")
+            service_sops.write_text("encrypted service secret material\n")
+            self._fake_sops(
+                root / "bin" / "sops",
+                calls_log,
+                "secrets:\n"
+                "  db_password:\n"
+                "    created: 2026-05-12T00:00:00Z\n"
+                "    version: 1\n"
+                "    value: structured-db-password\n",
+            )
+            env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
 
             result = subprocess.run(
                 [str(REPO_ROOT / "scripts" / "service-deploy"), "immich"],
@@ -124,11 +134,137 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
                 [
                     {
                         "podman_name": "fortress_immich_db_password",
-                        "sops_extract": '["secrets"]["db_password"]',
+                        "sops_extract": '["secrets"]["db_password"]["value"]',
                     }
                 ],
                 extra_vars["fortress_service_secrets"],
             )
+
+    def test_service_deploy_rejects_scalar_legacy_service_secret_before_remote_playbook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            calls_log = root / "calls.log"
+            self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+            self._fake_sops(
+                root / "bin" / "sops",
+                calls_log,
+                "secrets:\n"
+                "  db_password: do-not-print-this-legacy-secret\n",
+            )
+            (root / "inventory" / "vms" / "media01.sops.yaml").write_text("encrypted vm material\n")
+            (root / "inventory" / "services" / "immich.yaml").write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      secrets:\n"
+                "        - secret: secrets.db_password\n"
+                "          env: IMMICH_DB_PASSWORD_FILE\n"
+            )
+            (root / "inventory" / "services" / "immich.sops.yaml").write_text("encrypted service secret material\n")
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+            env["CALLS_LOG"] = str(calls_log)
+            env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "immich"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Service Secret secrets.db_password", result.stderr)
+            self.assertIn("structured entry", result.stderr)
+            self.assertNotIn("do-not-print-this-legacy-secret", result.stderr)
+            self.assertNotIn("ansible-playbook", calls_log.read_text())
+
+    def test_service_deploy_preflight_reports_missing_structured_service_secret_fields(self):
+        cases = {
+            "missing_entry": (
+                "secrets:\n"
+                "  other_password:\n"
+                "    created: 2026-05-12T00:00:00Z\n"
+                "    version: 1\n"
+                "    value: do-not-print-other\n",
+                "missing Service Secret secrets.db_password",
+            ),
+            "missing_created": (
+                "secrets:\n"
+                "  db_password:\n"
+                "    version: 1\n"
+                "    value: do-not-print-password\n",
+                "missing required field(s): created",
+            ),
+            "missing_version": (
+                "secrets:\n"
+                "  db_password:\n"
+                "    created: 2026-05-12T00:00:00Z\n"
+                "    value: do-not-print-password\n",
+                "missing required field(s): version",
+            ),
+            "missing_value": (
+                "secrets:\n"
+                "  db_password:\n"
+                "    created: 2026-05-12T00:00:00Z\n"
+                "    version: 1\n",
+                "missing required field(s): value",
+            ),
+        }
+        for scenario, (decrypted, expected_error) in cases.items():
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+                scripts_dir = root / "scripts"
+                scripts_dir.mkdir(exist_ok=True)
+                calls_log = root / "calls.log"
+                self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+                self._fake_sops(root / "bin" / "sops", calls_log, decrypted)
+                (root / "inventory" / "vms" / "media01.sops.yaml").write_text("encrypted vm material\n")
+                (root / "inventory" / "services" / "immich.yaml").write_text(
+                    "name: immich\n"
+                    "backend:\n"
+                    "  vm: media01\n"
+                    "  port: 2283\n"
+                    "deploy:\n"
+                    "  type: quadlet\n"
+                    "  containers:\n"
+                    "    - name: server\n"
+                    "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                    "      secrets:\n"
+                    "        - secret: secrets.db_password\n"
+                    "          env: IMMICH_DB_PASSWORD_FILE\n"
+                )
+                (root / "inventory" / "services" / "immich.sops.yaml").write_text("encrypted service secret material\n")
+                env = os.environ.copy()
+                env["FORTRESS_ROOT"] = str(root)
+                env["CALLS_LOG"] = str(calls_log)
+                env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+
+                result = subprocess.run(
+                    [str(REPO_ROOT / "scripts" / "service-deploy"), "immich"],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(expected_error, result.stderr)
+                self.assertNotIn("do-not-print", result.stderr)
+                self.assertNotIn("ansible-playbook", calls_log.read_text())
 
     def test_service_deploy_playbook_validates_subpaths_before_starting_containers(self):
         playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
@@ -387,6 +523,19 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             "#!/usr/bin/env bash\n"
             "shift 2\n"
             "printf '%s ' \"$@\" > \"$CALLS_LOG\"\n"
+        )
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def _fake_sops(self, path, calls_log, decrypted):
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'sops %s\\n' \"$*\" >> \"$CALLS_LOG\"\n"
+            "if [ \"$1\" = \"--decrypt\" ]; then\n"
+            "  cat <<'YAML'\n"
+            f"{decrypted}"
+            "YAML\n"
+            "fi\n"
         )
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 

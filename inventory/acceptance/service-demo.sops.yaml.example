@@ -1,0 +1,5 @@
+secrets:
+  demo_password:
+    created: 2026-05-12T00:00:00Z
+    version: 1
+    value: "<replace with generated demo password before encrypting>"

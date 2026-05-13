@@ -339,6 +339,29 @@ class InventorySchemaTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("deploy", result.stdout + result.stderr)
 
+    def test_service_schema_accepts_secret_env_value_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "pihole.yaml"
+            service_yaml.write_text(
+                "name: pihole\n"
+                "backend:\n"
+                "  vm: dns-primary-vm\n"
+                "  port: 80\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: pihole\n"
+                "      image: docker.io/pihole/pihole:2025.05.0\n"
+                "      secrets:\n"
+                "        - secret: secrets.web_api_password\n"
+                "          env: WEBPASSWORD_FILE\n"
+                "          env_value: secret_name\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_service_schema_accepts_native_config_files_and_requires_reload_or_restart_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             service_yaml = Path(tmp) / "caddy.yaml"

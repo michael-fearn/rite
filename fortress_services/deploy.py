@@ -1,7 +1,16 @@
-from pathlib import PurePosixPath
+import json
+import subprocess
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from fortress_services.quadlet import render_quadlet_service
+
+
+REQUIRED_SERVICE_SECRET_FIELDS = ("created", "version", "value")
+
+
+class ServiceSecretPreflightError(ValueError):
+    pass
 
 
 def share_backed_volume_subpaths(service, vm):
@@ -24,6 +33,18 @@ def share_backed_volume_subpaths(service, vm):
 
 def service_secret_installations(service):
     installations = []
+    for secret_key in service_secret_keys(service):
+        installations.append(
+            {
+                "podman_name": f"fortress_{service['name']}_{secret_key}",
+                "sops_extract": _sops_extract_path("secrets", secret_key, "value"),
+            }
+        )
+    return installations
+
+
+def service_secret_keys(service):
+    keys = []
     seen = set()
     for container in service.get("deploy", {}).get("containers", []) or []:
         for secret in container.get("secrets", []) or []:
@@ -31,13 +52,47 @@ def service_secret_installations(service):
             if secret_key in seen:
                 continue
             seen.add(secret_key)
-            installations.append(
-                {
-                    "podman_name": f"fortress_{service['name']}_{secret_key}",
-                    "sops_extract": f'["secrets"]["{secret_key}"]',
-                }
+            keys.append(secret_key)
+    return keys
+
+
+def preflight_service_secret_shape(service_name, service_sops_path, secret_keys):
+    result = subprocess.run(
+        ["sops", "--decrypt", str(service_sops_path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise ServiceSecretPreflightError(
+            f"failed to decrypt Service Sibling SOPS File at {service_sops_path} "
+            f"for Service {service_name}"
+        )
+
+    entries = _service_secret_entries(result.stdout)
+    for secret_key in secret_keys:
+        fields = entries.get(secret_key)
+        if secret_key not in entries:
+            raise ServiceSecretPreflightError(
+                f"missing Service Secret secrets.{secret_key} in Service Sibling SOPS File "
+                f"{service_sops_path}"
             )
-    return installations
+        if fields is None:
+            raise ServiceSecretPreflightError(
+                f"Service Secret secrets.{secret_key} in {service_sops_path} must be a "
+                "structured entry with created, version, and value fields; scalar legacy "
+                "entries are not supported"
+            )
+        missing = [
+            field
+            for field in REQUIRED_SERVICE_SECRET_FIELDS
+            if field not in fields
+        ]
+        if missing:
+            raise ServiceSecretPreflightError(
+                f"Service Secret secrets.{secret_key} in {service_sops_path} is missing "
+                f"required field(s): {', '.join(missing)}"
+            )
 
 
 def quadlet_deploy_vars(service, vm, inventory_root=None):
@@ -157,3 +212,96 @@ def service_secret_key(secret):
     if reference.startswith("secrets."):
         return reference.split(".", 1)[1]
     return reference
+
+
+def _service_secret_entries(yaml_text):
+    lines = _yaml_lines(yaml_text)
+    for position, (indent, text) in enumerate(lines):
+        key, raw_value = _yaml_mapping_entry(text)
+        if indent == 0 and key == "secrets":
+            if raw_value:
+                return {}
+            return _nested_service_secret_entries(lines, position, indent)
+    return {}
+
+
+def _nested_service_secret_entries(lines, start_position, parent_indent):
+    entries = {}
+    secret_indent = _next_child_indent(lines, start_position, parent_indent)
+    if secret_indent is None:
+        return entries
+
+    position = start_position + 1
+    while position < len(lines):
+        indent, text = lines[position]
+        if indent <= parent_indent:
+            break
+        if indent != secret_indent:
+            position += 1
+            continue
+        key, raw_value = _yaml_mapping_entry(text)
+        if key is None:
+            position += 1
+            continue
+        if raw_value:
+            entries[key] = _inline_mapping_fields(raw_value)
+            position += 1
+            continue
+
+        field_indent = _next_child_indent(lines, position, secret_indent)
+        fields = set()
+        position += 1
+        while position < len(lines):
+            field_line_indent, field_text = lines[position]
+            if field_line_indent <= secret_indent:
+                break
+            if field_indent is not None and field_line_indent == field_indent:
+                field_key, _field_raw_value = _yaml_mapping_entry(field_text)
+                if field_key is not None:
+                    fields.add(field_key)
+            position += 1
+        entries[key] = fields
+    return entries
+
+
+def _yaml_lines(yaml_text):
+    lines = []
+    for raw_line in yaml_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append((len(raw_line) - len(raw_line.lstrip(" ")), raw_line.lstrip(" ")))
+    return lines
+
+
+def _next_child_indent(lines, parent_position, parent_indent):
+    for indent, _text in lines[parent_position + 1:]:
+        if indent <= parent_indent:
+            return None
+        return indent
+    return None
+
+
+def _yaml_mapping_entry(text):
+    if text.startswith("- ") or ":" not in text:
+        return None, None
+    key, raw_value = text.split(":", 1)
+    key = key.strip().strip("\"'")
+    if not key:
+        return None, None
+    return key, raw_value.strip()
+
+
+def _inline_mapping_fields(raw_value):
+    if not (raw_value.startswith("{") and raw_value.endswith("}")):
+        return None
+    fields = set()
+    for part in raw_value[1:-1].split(","):
+        key, _value = _yaml_mapping_entry(part.strip())
+        if key is not None:
+            fields.add(key)
+    return fields
+
+
+def _sops_extract_path(*parts):
+    return "".join(f"[{json.dumps(part)}]" for part in parts)

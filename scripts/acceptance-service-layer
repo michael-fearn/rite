@@ -459,7 +459,10 @@ def write_service_sops(repo_root, path):
     secret = service_secret_value(repo_root)
     path.write_text(
         "secrets:\n"
-        f"  acceptance_token: {secret}\n"
+        "  acceptance_token:\n"
+        "    created: 2026-05-12T00:00:00Z\n"
+        "    version: 1\n"
+        f"    value: {secret}\n"
     )
 
 
