@@ -40,6 +40,7 @@ def main():
 
 def regenerate_ingress(repo_root, model, caddy_routes, dns_record_sets):
     ingress_vm = model.services["internal-ingress"]["backend"]["vm"]
+    print("Regenerating ingress from Inventory...", flush=True)
     if not _run_step(
         repo_root,
         f"push Caddy routes to {ingress_vm}",
@@ -75,16 +76,19 @@ def regenerate_ingress(repo_root, model, caddy_routes, dns_record_sets):
         ):
             return 1
 
+    print("Ingress regeneration complete.", flush=True)
     return 0
 
 
 def _run_step(repo_root, description, vm, command, stdin=""):
+    print(f"running: {description}", flush=True)
     result = subprocess.run(
         [str(repo_root / "scripts" / "vm-shell"), vm, "--", *command],
         input=stdin,
         text=True,
     )
     if result.returncode == 0:
+        print(f"ok: {description}", flush=True)
         return True
     print(f"failed: {description}", file=sys.stderr)
     return False

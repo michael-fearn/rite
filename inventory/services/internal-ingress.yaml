@@ -9,6 +9,12 @@ deploy:
   package: caddy
   apt_repo: caddy_official
   service_name: caddy
+  caddy_modules:
+    - package: github.com/caddy-dns/cloudflare
+      module: dns.providers.cloudflare
+  environment_secrets:
+    - secret: secrets.cloudflare_api_token
+      env: CLOUDFLARE_API_TOKEN
   config_files:
     - template: Caddyfile.j2
       dest: /etc/caddy/Caddyfile
@@ -16,5 +22,9 @@ deploy:
       reload_on_change: true
     - template: caddy.env.j2
       dest: /etc/default/caddy
+      mode: "0600"
+      restart_on_change: true
+    - template: caddy.service.d/fortress-env.conf.j2
+      dest: /etc/systemd/system/caddy.service.d/fortress-env.conf
       mode: "0644"
       restart_on_change: true

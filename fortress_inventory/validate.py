@@ -200,6 +200,19 @@ def _validate_native_services(model):
                     f"Service {service_name} references missing apt repository {apt_repo}",
                 )
             )
+        for secret_index, secret in enumerate(deploy.get("environment_secrets", []) or []):
+            secret_ref = secret.get("secret")
+            if secret_ref and not secret_ref.startswith("secrets."):
+                errors.append(
+                    ValidationError(
+                        "native_environment_secret_reference_not_sibling_sops_secret",
+                        (
+                            f"inventory/services/{service_name}.yaml.deploy."
+                            f"environment_secrets[{secret_index}].secret"
+                        ),
+                        f"Service {service_name} Native Service Environment Secret references must use secrets.<name>",
+                    )
+                )
     return errors
 
 

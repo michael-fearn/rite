@@ -42,7 +42,7 @@ def main():
         print(f"VM {vm!r} has no ansible_ssh_private_key_file in Ansible Inventory", file=sys.stderr)
         return 1
 
-    ssh_args = ["ssh"]
+    ssh_args = ["ssh", "-F", "/dev/null"]
     if not remote_command:
         ssh_args.append("-t")
     common_args = vm_vars.get("ansible_ssh_common_args")

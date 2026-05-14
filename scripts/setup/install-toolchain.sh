@@ -61,6 +61,7 @@ install_apt_packages() {
   apt_install \
     age \
     bash-completion \
+    bind9-dnsutils \
     ca-certificates \
     curl \
     git \

@@ -206,6 +206,7 @@ def native_deploy_vars(service, globals_, inventory_root=None):
         "fortress_native_package": deploy["package"],
         "fortress_native_apt_repo": apt_repo,
         "fortress_native_systemd_unit": deploy["service_name"],
+        "fortress_native_caddy_modules": deploy.get("caddy_modules", []) or [],
         "fortress_native_config_files": [
             {
                 "src": str(template_root / config_file["template"]),

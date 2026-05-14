@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from fortress_inventory.model import load_inventory_tree
-from fortress_services.deploy import quadlet_deploy_vars
+from fortress_services.deploy import native_deploy_vars, quadlet_deploy_vars
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -142,6 +142,181 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
                 ],
                 extra_vars["fortress_service_secrets"],
             )
+
+    def test_service_deploy_requires_service_sibling_sops_file_for_native_environment_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            calls_log = root / "calls.log"
+            self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+            (root / "inventory" / "vms" / "media01.sops.yaml").write_text("encrypted vm material\n")
+            template_dir = root / "inventory" / "services" / "caddy.native.d"
+            template_dir.mkdir()
+            (template_dir / "caddy.env.j2").write_text(
+                "CLOUDFLARE_API_TOKEN={{ fortress_native_environment_secrets.CLOUDFLARE_API_TOKEN }}\n"
+            )
+            (root / "inventory" / "services" / "caddy.yaml").write_text(
+                "name: caddy\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 80\n"
+                "deploy:\n"
+                "  type: native\n"
+                "  package: caddy\n"
+                "  service_name: caddy\n"
+                "  environment_secrets:\n"
+                "    - secret: secrets.cloudflare_api_token\n"
+                "      env: CLOUDFLARE_API_TOKEN\n"
+                "  config_files:\n"
+                "    - template: caddy.env.j2\n"
+                "      dest: /etc/default/caddy\n"
+                "      mode: '0600'\n"
+                "      restart_on_change: true\n"
+            )
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+            env["CALLS_LOG"] = str(calls_log)
+
+            missing = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "caddy"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("Native Service Environment Secrets", missing.stderr)
+            self.assertNotIn("Service Secrets.", missing.stderr)
+            self.assertFalse(calls_log.exists())
+
+    def test_service_deploy_preflights_native_environment_secrets_and_passes_extract_specs_to_playbook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            calls_log = root / "calls.log"
+            self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+            self._fake_sops(
+                root / "bin" / "sops",
+                calls_log,
+                "secrets:\n"
+                "  cloudflare_api_token:\n"
+                "    created: 2026-05-14T00:00:00Z\n"
+                "    version: 1\n"
+                "    value: do-not-pass-this-token-in-extra-vars\n",
+            )
+            (root / "inventory" / "vms" / "media01.sops.yaml").write_text("encrypted vm material\n")
+            (root / "inventory" / "services" / "caddy.sops.yaml").write_text("encrypted service secret material\n")
+            template_dir = root / "inventory" / "services" / "caddy.native.d"
+            template_dir.mkdir()
+            (template_dir / "caddy.env.j2").write_text(
+                "CLOUDFLARE_API_TOKEN={{ fortress_native_environment_secrets.CLOUDFLARE_API_TOKEN }}\n"
+            )
+            (root / "inventory" / "services" / "caddy.yaml").write_text(
+                "name: caddy\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 80\n"
+                "deploy:\n"
+                "  type: native\n"
+                "  package: caddy\n"
+                "  service_name: caddy\n"
+                "  environment_secrets:\n"
+                "    - secret: secrets.cloudflare_api_token\n"
+                "      env: CLOUDFLARE_API_TOKEN\n"
+                "  config_files:\n"
+                "    - template: caddy.env.j2\n"
+                "      dest: /etc/default/caddy\n"
+                "      mode: '0600'\n"
+                "      restart_on_change: true\n"
+            )
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+            env["CALLS_LOG"] = str(calls_log)
+            env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "caddy"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            command = calls_log.read_text()
+            self.assertNotIn("do-not-pass-this-token-in-extra-vars", command)
+            extra_vars = json.loads(command.split("--extra-vars ", 1)[1])
+            self.assertEqual(str(root / "inventory" / "services" / "caddy.sops.yaml"), extra_vars["fortress_service_sops_file"])
+            self.assertEqual(
+                [
+                    {
+                        "env": "CLOUDFLARE_API_TOKEN",
+                        "sops_extract": '["secrets"]["cloudflare_api_token"]["value"]',
+                    }
+                ],
+                extra_vars["fortress_native_environment_secret_specs"],
+            )
+
+    def test_service_deploy_rejects_malformed_native_environment_secret_before_remote_playbook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            calls_log = root / "calls.log"
+            self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+            self._fake_sops(
+                root / "bin" / "sops",
+                calls_log,
+                "secrets:\n"
+                "  cloudflare_api_token: do-not-print-this-token\n",
+            )
+            (root / "inventory" / "vms" / "media01.sops.yaml").write_text("encrypted vm material\n")
+            (root / "inventory" / "services" / "caddy.sops.yaml").write_text("encrypted service secret material\n")
+            (root / "inventory" / "services" / "caddy.yaml").write_text(
+                "name: caddy\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 80\n"
+                "deploy:\n"
+                "  type: native\n"
+                "  package: caddy\n"
+                "  service_name: caddy\n"
+                "  environment_secrets:\n"
+                "    - secret: secrets.cloudflare_api_token\n"
+                "      env: CLOUDFLARE_API_TOKEN\n"
+                "  config_files:\n"
+                "    - template: caddy.env.j2\n"
+                "      dest: /etc/default/caddy\n"
+                "      mode: '0600'\n"
+                "      restart_on_change: true\n"
+            )
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+            env["CALLS_LOG"] = str(calls_log)
+            env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "caddy"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Native Service Environment Secret secrets.cloudflare_api_token", result.stderr)
+            self.assertIn("structured entry", result.stderr)
+            self.assertNotIn("do-not-print-this-token", result.stderr)
+            self.assertNotIn("ansible-playbook", calls_log.read_text())
 
     def test_service_deploy_rejects_scalar_legacy_service_secret_before_remote_playbook(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -376,6 +551,10 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         )
 
         self.assertIn("Environment=FTLCONF_misc_etc_dnsmasq_d=true\n", pihole_artifact["content"])
+        self.assertIn(
+            "Volume=/srv/services/dns-primary/pihole/etc-dnsmasq.d:/etc/dnsmasq.d:rw\n",
+            pihole_artifact["content"],
+        )
 
     def test_internal_ingress_service_deploy_scaffolding_imports_generated_routes(self):
         caddyfile = (REPO_ROOT / "inventory" / "services" / "internal-ingress.native.d" / "Caddyfile.j2").read_text()
@@ -384,6 +563,65 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         self.assertIn("import /etc/caddy/fortress/generated-routes.caddy", caddyfile)
         self.assertNotIn("forgejo.fearn.cloud {", caddyfile)
         self.assertNotIn("reverse_proxy 10.", caddyfile)
+
+    def test_internal_ingress_declares_cloudflare_native_environment_secret_for_caddy(self):
+        model = load_inventory_tree(REPO_ROOT)
+        service = model.services["internal-ingress"]
+        caddy_env = (REPO_ROOT / "inventory" / "services" / "internal-ingress.native.d" / "caddy.env.j2").read_text()
+        service_sops = (REPO_ROOT / "inventory" / "services" / "internal-ingress.sops.yaml").read_text()
+
+        self.assertEqual(
+            [
+                {
+                    "secret": "secrets.cloudflare_api_token",
+                    "env": "CLOUDFLARE_API_TOKEN",
+                }
+            ],
+            service["deploy"]["environment_secrets"],
+        )
+        self.assertIn(
+            {
+                "template": "caddy.env.j2",
+                "dest": "/etc/default/caddy",
+                "mode": "0600",
+                "restart_on_change": True,
+            },
+            service["deploy"]["config_files"],
+        )
+        self.assertIn(
+            {
+                "template": "caddy.service.d/fortress-env.conf.j2",
+                "dest": "/etc/systemd/system/caddy.service.d/fortress-env.conf",
+                "mode": "0644",
+                "restart_on_change": True,
+            },
+            service["deploy"]["config_files"],
+        )
+        self.assertIn(
+            "CLOUDFLARE_API_TOKEN={{ fortress_native_environment_secrets.CLOUDFLARE_API_TOKEN }}",
+            caddy_env,
+        )
+        self.assertIn("cloudflare_api_token:", service_sops)
+        self.assertIn("created:", service_sops)
+        self.assertIn("version:", service_sops)
+        self.assertIn("value:", service_sops)
+
+    def test_internal_ingress_declares_cloudflare_caddy_module_for_service_deploy(self):
+        model = load_inventory_tree(REPO_ROOT)
+        service = model.services["internal-ingress"]
+
+        deploy_vars = native_deploy_vars(service, model.globals, inventory_root=REPO_ROOT / "inventory")
+
+        self.assertEqual(
+            [
+                {
+                    "package": "github.com/caddy-dns/cloudflare",
+                    "module": "dns.providers.cloudflare",
+                }
+            ],
+            service["deploy"]["caddy_modules"],
+        )
+        self.assertEqual(service["deploy"]["caddy_modules"], deploy_vars["fortress_native_caddy_modules"])
 
     def test_service_deploy_passes_native_package_repo_unit_and_config_files_to_playbook(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -520,10 +758,13 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         self.assertIn("fortress_native_apt_repo", playbook)
         self.assertIn("name: Install Native Service package", playbook)
         self.assertIn("name: Render Native Service config files", playbook)
+        self.assertIn("name: Ensure Native Service config parent directories exist", playbook)
         self.assertIn("loop: \"{{ fortress_native_config_files | default([]) }}\"", playbook)
         self.assertIn("src: \"{{ item.src }}\"", playbook)
         self.assertIn("dest: \"{{ item.dest }}\"", playbook)
         self.assertIn("mode: \"{{ item.mode }}\"", playbook)
+        self.assertIn("name: Reload systemd after Native Service unit drop-in changes", playbook)
+        self.assertIn("daemon_reload: true", playbook)
         self.assertIn("name: Restart Native Service after restart-marked config changes", playbook)
         self.assertIn("name: Reload Native Service after reload-only config changes", playbook)
         self.assertIn("fortress_service_start_units | default([])", playbook)
@@ -537,11 +778,46 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             playbook.index("name: Configure Native Service apt repository"),
         )
         self.assertLess(
+            playbook.index("name: Ensure Native Service config parent directories exist"),
+            playbook.index("name: Render Native Service config files"),
+        )
+        self.assertLess(
+            playbook.index("name: Reload systemd after Native Service unit drop-in changes"),
+            playbook.index("name: Restart Native Service after restart-marked config changes"),
+        )
+        self.assertLess(
             playbook.index("name: Restart Native Service after restart-marked config changes"),
             playbook.index("name: Reload Native Service after reload-only config changes"),
         )
         self.assertIn("fortress_native_restart_needed | default(false) | bool", playbook)
         self.assertIn("not (fortress_native_restart_needed | default(false) | bool)", playbook)
+
+    def test_service_deploy_playbook_converges_caddy_modules_before_native_config_restart(self):
+        playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
+
+        self.assertIn("name: List installed Caddy modules for Native Service package extensions", playbook)
+        self.assertIn("caddy list-modules", playbook)
+        self.assertIn("name: Install missing Caddy module package extensions", playbook)
+        self.assertIn("caddy add-package {{ item.package }}", playbook)
+        self.assertIn("item.module not in fortress_installed_caddy_modules.stdout_lines", playbook)
+        self.assertIn("name: Verify required Caddy modules are available", playbook)
+        self.assertIn("Required Caddy module {{ item.module }} is missing after package extension convergence", playbook)
+        self.assertLess(
+            playbook.index("name: Install Native Service package"),
+            playbook.index("name: List installed Caddy modules for Native Service package extensions"),
+        )
+        self.assertLess(
+            playbook.index("name: Install missing Caddy module package extensions"),
+            playbook.index("name: Verify required Caddy modules are available"),
+        )
+        self.assertLess(
+            playbook.index("name: Verify required Caddy modules are available"),
+            playbook.index("name: Render Native Service config files"),
+        )
+        self.assertLess(
+            playbook.index("name: Verify required Caddy modules are available"),
+            playbook.index("name: Restart Native Service after restart-marked config changes"),
+        )
 
     def _fake_decrypt_keys(self, path, calls_log):
         path.write_text(

@@ -537,7 +537,9 @@ Service Ingress is declared on Service inventory with an explicit hostname, `ing
 
 Host Ingress Routes are declared on Host inventory, not as synthetic Services. They share hostname collision checks, TLS, generated DNS, and Ingress Regeneration with Service Ingress, but they target the Host `network.management_address` for Proxmox web UI access. Caddy enforces Trusted-only source ranges for Host Ingress Routes because Service routes and Host management routes share the same Ingress VM address.
 
-Caddy generated-route ownership is split from Caddy installation. `service-deploy internal-ingress` owns the Native Service, base Caddyfile, Cloudflare environment, and import of the generated route file. `just ingress-regenerate` owns only the generated Caddy routes, installs them on the Ingress VM, and reloads Caddy.
+Caddy generated-route ownership is split from Caddy installation. `service-deploy internal-ingress` owns the Native Service, base Caddyfile, Cloudflare environment, repo-owned Caddy package extension for `github.com/caddy-dns/cloudflare` / `dns.providers.cloudflare`, and import of the generated route file. `just ingress-regenerate` owns only the generated Caddy routes, installs them on the Ingress VM, and reloads Caddy.
+
+The Cloudflare DNS provider module is declared in `inventory/services/internal-ingress.yaml` and converged during Service Deploy before Caddy config is rendered, reloaded, or restarted. Do not repair this durably with manual `caddy add-package`; that command is only a break-glass move when live ingress is down and must be followed by `service-deploy internal-ingress` once the operator can safely converge from Inventory again.
 
 ### 10.6. DNS
 
@@ -545,13 +547,13 @@ Pi-hole + Unbound on a separate VM (DNS appliance, different criticality and lif
 
 Generated DNS ownership belongs to Ingress Regeneration. Ingress DNS Records are generated per declared Service Ingress hostname and per declared Host Ingress Route hostname. Each record points to the Ingress VM address, not to the Backend VM or Host management address.
 
-Ingress DNS Targets are DNS Services that opt into receiving the generated record set through `capabilities.ingress_records`. The first provider is Pi-hole's dnsmasq compatibility surface, rendered as `99-fortress-ingress.conf` at `/etc/dnsmasq.d/99-fortress-ingress.conf`. Ingress Regeneration authoritatively replaces that generated file and reloads every target DNS Service.
+Ingress DNS Targets are DNS Services that opt into receiving the generated record set through `capabilities.ingress_records`. The first provider is Pi-hole's dnsmasq compatibility surface, rendered as `99-fortress-ingress.conf` in the Service-owned dnsmasq directory mounted at `/etc/dnsmasq.d` inside the Pi-hole container. Ingress Regeneration authoritatively replaces that generated file and reloads every target DNS Service.
 
 Manual Pi-hole records are outside generated DNS ownership. Operators may keep UI/API/manual dnsmasq records for non-Ingress names, but those records must not be placed in `99-fortress-ingress.conf` because the file is replaced from Inventory.
 
 ### 10.7. TLS
 
-Let's Encrypt via DNS-01 challenge through Cloudflare API (scope: DNS edit on `fearn.cloud` only). Real public certs for internal hostnames without exposing services to the internet. CF API token in `inventory/services/caddy.sops.yaml`. Token must be provisioned out-of-band before first deploy (documented in `runbooks/dependencies.md`).
+Let's Encrypt via DNS-01 challenge through Cloudflare API (scope: DNS edit on `fearn.cloud` only). Real public certs for internal hostnames without exposing services to the internet. The Cloudflare API Token lives in `inventory/services/internal-ingress.sops.yaml`. Token must be provisioned out-of-band before first deploy.
 
 ---
 

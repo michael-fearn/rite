@@ -12,9 +12,13 @@ USAGE
 
 tmpfs_dir="${FORTRESS_KEY_DIR:-/dev/shm/fortress}"
 declare -a sops_files=()
+declare -a key_paths=()
 
 cleanup() {
-  rm -rf "$tmpfs_dir"
+  if [[ ${#key_paths[@]} -gt 0 ]]; then
+    rm -f -- "${key_paths[@]}"
+  fi
+  rmdir "$tmpfs_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -50,6 +54,7 @@ install -d -m 0700 "$tmpfs_dir"
 for sops_file in "${sops_files[@]}"; do
   entity="$(basename "$sops_file" .sops.yaml)"
   key_path="$tmpfs_dir/${entity}.key"
+  key_paths+=("$key_path")
   sops --decrypt --extract '["ssh_keys"]["bootstrap"]["private_key"]' "$sops_file" > "$key_path"
   chmod 0600 "$key_path"
 done

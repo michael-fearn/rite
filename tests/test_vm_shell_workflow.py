@@ -113,7 +113,7 @@ class VMShellWorkflowTests(unittest.TestCase):
             self.assertIn("decrypt-keys", calls_log.read_text())
             self.assertIn("inventory/vms/media01.sops.yaml -- ssh", calls_log.read_text())
             self.assertIn(
-                "ssh -t -o StrictHostKeyChecking=accept-new -i /dev/shm/fortress/media01.key admin@10.0.10.101",
+                "ssh -F /dev/null -t -o StrictHostKeyChecking=accept-new -i /dev/shm/fortress/media01.key admin@10.0.10.101",
                 calls_log.read_text(),
             )
 
@@ -146,7 +146,7 @@ class VMShellWorkflowTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(
-                "ssh -o StrictHostKeyChecking=accept-new -i /dev/shm/fortress/media01.key "
+                "ssh -F /dev/null -o StrictHostKeyChecking=accept-new -i /dev/shm/fortress/media01.key "
                 "admin@10.0.10.101 systemctl is-active fortress-dns-primary-pihole.service",
                 calls_log.read_text(),
             )
@@ -179,7 +179,7 @@ class VMShellWorkflowTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(
-                """ssh -i /dev/shm/fortress/media01.key admin@10.0.10.101 sh -lc 'printf '"'"'%s\\n'"'"' "$tcp" | awk '"'"'{print $4}'"'"''""",
+                """ssh -F /dev/null -i /dev/shm/fortress/media01.key admin@10.0.10.101 sh -lc 'printf '"'"'%s\\n'"'"' "$tcp" | awk '"'"'{print $4}'"'"''""",
                 calls_log.read_text(),
             )
 

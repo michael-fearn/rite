@@ -58,9 +58,14 @@ def main():
     native_environment_secret_keys_ = native_environment_secret_keys(service)
     service_sops = repo_root / "inventory" / "services" / f"{service_name}.sops.yaml"
     if (service_secrets or native_environment_secret_keys_) and not service_sops.is_file():
+        declared_secret_kinds = []
+        if service_secrets:
+            declared_secret_kinds.append("Service Secrets")
+        if native_environment_secret_keys_:
+            declared_secret_kinds.append("Native Service Environment Secrets")
         print(
             f"Service Sibling SOPS File is required at {service_sops} because Service {service_name} "
-            "declares Service Secrets.",
+            f"declares {' and '.join(declared_secret_kinds)}.",
             file=sys.stderr,
         )
         return 1

@@ -40,6 +40,9 @@ deploy:
         - service_path: pihole/etc-pihole
           container: /etc/pihole
           access: read_write
+        - service_path: pihole/etc-dnsmasq.d
+          container: /etc/dnsmasq.d
+          access: read_write
     - name: unbound
       image: docker.io/mvance/unbound:1.22.0
       volumes:

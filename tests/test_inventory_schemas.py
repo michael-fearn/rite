@@ -439,3 +439,49 @@ class InventorySchemaTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("config_files", result.stdout + result.stderr)
+
+    def test_service_schema_accepts_native_environment_secrets_but_not_on_quadlet_services(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "caddy.yaml"
+            service_yaml.write_text(
+                "name: caddy\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 80\n"
+                "deploy:\n"
+                "  type: native\n"
+                "  package: caddy\n"
+                "  service_name: caddy\n"
+                "  environment_secrets:\n"
+                "    - secret: secrets.cloudflare_api_token\n"
+                "      env: CLOUDFLARE_API_TOKEN\n"
+                "  config_files:\n"
+                "    - template: caddy.env.j2\n"
+                "      dest: /etc/default/caddy\n"
+                "      mode: '0600'\n"
+                "      restart_on_change: true\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            service_yaml.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  environment_secrets:\n"
+                "    - secret: secrets.cloudflare_api_token\n"
+                "      env: CLOUDFLARE_API_TOKEN\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("environment_secrets", result.stdout + result.stderr)

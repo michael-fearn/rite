@@ -170,6 +170,41 @@
         update_cache: "{{ fortress_native_apt_repo | default(none) is none }}"
       when: fortress_service_deploy_type == "native"
 
+    - name: List installed Caddy modules for Native Service package extensions
+      ansible.builtin.command:
+        cmd: caddy list-modules
+      register: fortress_installed_caddy_modules
+      changed_when: false
+      when:
+        - fortress_service_deploy_type == "native"
+        - fortress_native_caddy_modules | default([]) | length > 0
+
+    - name: Install missing Caddy module package extensions
+      ansible.builtin.command:
+        cmd: "caddy add-package {{ item.package }}"
+      loop: "{{ fortress_native_caddy_modules | default([]) }}"
+      register: fortress_caddy_module_installations
+      when:
+        - fortress_service_deploy_type == "native"
+        - item.module not in fortress_installed_caddy_modules.stdout_lines
+
+    - name: Refresh installed Caddy modules after package extension convergence
+      ansible.builtin.command:
+        cmd: caddy list-modules
+      register: fortress_installed_caddy_modules
+      changed_when: false
+      when:
+        - fortress_service_deploy_type == "native"
+        - fortress_native_caddy_modules | default([]) | length > 0
+
+    - name: Verify required Caddy modules are available
+      ansible.builtin.fail:
+        msg: "Required Caddy module {{ item.module }} is missing after package extension convergence"
+      loop: "{{ fortress_native_caddy_modules | default([]) }}"
+      when:
+        - fortress_service_deploy_type == "native"
+        - item.module not in fortress_installed_caddy_modules.stdout_lines
+
     - name: Extract Native Service Environment Secrets
       ansible.builtin.set_fact:
         fortress_native_environment_secrets: >-
@@ -181,6 +216,16 @@
           }}
       loop: "{{ fortress_native_environment_secret_specs | default([]) }}"
       no_log: true
+      when: fortress_service_deploy_type == "native"
+
+    - name: Ensure Native Service config parent directories exist
+      ansible.builtin.file:
+        path: "{{ item.dest | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ fortress_native_config_files | default([]) }}"
       when: fortress_service_deploy_type == "native"
 
     - name: Render Native Service config files
@@ -195,10 +240,23 @@
       no_log: "{{ (fortress_native_environment_secret_specs | default([]) | length) > 0 }}"
       when: fortress_service_deploy_type == "native"
 
+    - name: Reload systemd after Native Service unit drop-in changes
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - fortress_service_deploy_type == "native"
+        - fortress_native_rendered_config_files.results | default([])
+          | selectattr('changed')
+          | selectattr('item.dest', 'match', '^/etc/systemd/system/')
+          | list
+          | length > 0
+
     - name: Record Native Service restart need
       ansible.builtin.set_fact:
         fortress_native_restart_needed: >-
           {{
+            (fortress_caddy_module_installations.changed | default(false))
+            or
             (
               fortress_native_rendered_config_files.results
               | default([])

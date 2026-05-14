@@ -20,6 +20,9 @@ class ArchitectureDocsTests(unittest.TestCase):
             "Ingress DNS Targets",
             "99-fortress-ingress.conf",
             "Manual Pi-hole records",
+            "repo-owned Caddy package extension",
+            "dns.providers.cloudflare",
+            "Do not repair this durably with manual `caddy add-package`",
         ]:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, content)

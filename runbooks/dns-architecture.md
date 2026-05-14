@@ -89,9 +89,12 @@ direct TCP/UDP 53 access to the DNS VM.
 Because `dns-primary` is also the Pi-hole-backed Ingress DNS Target, Service
 Deploy enables Pi-hole v6 `/etc/dnsmasq.d` compatibility with
 `FTLCONF_misc_etc_dnsmasq_d=true`. Ingress Regeneration owns the generated DNS
-record file at `/etc/dnsmasq.d/99-fortress-ingress.conf`. That file is the
-fortress-owned Ingress DNS Record Set: it is authoritatively replaced from
-current Inventory and does not mutate Pi-hole manual records.
+record file at
+`/srv/services/dns-primary/pihole/etc-dnsmasq.d/99-fortress-ingress.conf`,
+which is mounted into the Pi-hole container at
+`/etc/dnsmasq.d/99-fortress-ingress.conf`. That file is the fortress-owned
+Ingress DNS Record Set: it is authoritatively replaced from current Inventory
+and does not mutate Pi-hole manual records.
 
 ## Ingress DNS Records and Targets
 
@@ -112,15 +115,17 @@ records through its Service capability declaration:
 capabilities:
   ingress_records:
     provider: pihole_dnsmasq
-    path: /etc/dnsmasq.d/99-fortress-ingress.conf
+    path: /srv/services/<dns-service>/pihole/etc-dnsmasq.d/99-fortress-ingress.conf
 ```
 
 `just ingress-regenerate` renders the fortress-owned generated file for every
 declared Ingress DNS Target, installs it at
-`/etc/dnsmasq.d/99-fortress-ingress.conf`, and reloads the target DNS Service.
-The file contains generated Ingress DNS Records for Ingress-enabled Services
-and declared Host Ingress Routes. It is replaced from Inventory on every run, so
-stale generated records disappear when the corresponding hostname is removed.
+`/srv/services/<dns-service>/pihole/etc-dnsmasq.d/99-fortress-ingress.conf`,
+and reloads the target DNS Service. The file appears inside the Pi-hole
+container at `/etc/dnsmasq.d/99-fortress-ingress.conf`. It contains generated
+Ingress DNS Records for Ingress-enabled Services and declared Host Ingress
+Routes. It is replaced from Inventory on every run, so stale generated records
+disappear when the corresponding hostname is removed.
 
 Manual Pi-hole records remain operator-owned. Records created in the Pi-hole UI,
 Pi-hole API, or another local dnsmasq file are outside fortress ownership and

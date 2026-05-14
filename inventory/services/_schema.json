@@ -171,6 +171,18 @@
             "package": { "type": "string", "minLength": 1 },
             "apt_repo": { "type": "string", "minLength": 1 },
             "service_name": { "type": "string", "minLength": 1 },
+            "caddy_modules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["package", "module"],
+                "properties": {
+                  "package": { "type": "string", "minLength": 1 },
+                  "module": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
             "environment_secrets": {
               "type": "array",
               "items": {

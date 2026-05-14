@@ -1,4 +1,7 @@
+import os
+import stat
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -88,6 +91,47 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("trap cleanup EXIT", script)
         self.assertIn("chmod 0600", script)
         self.assertIn("sops --decrypt", script)
+
+    def test_decrypt_keys_wrapper_preserves_known_hosts_but_removes_decrypted_keys(self):
+        wrapper = REPO_ROOT / "scripts" / "decrypt-keys"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key_dir = root / "keys"
+            bin_dir = root / "bin"
+            key_dir.mkdir()
+            bin_dir.mkdir()
+            (key_dir / "known_hosts").write_text("10.0.0.1 ssh-ed25519 test\n")
+            sops_file = root / "media01.sops.yaml"
+            sops_file.write_text("encrypted: value\n")
+
+            fake_sops = bin_dir / "sops"
+            fake_sops.write_text("#!/usr/bin/env bash\nprintf '%s\\n' 'PRIVATE KEY'\n")
+            fake_sops.chmod(fake_sops.stat().st_mode | stat.S_IXUSR)
+
+            env = os.environ.copy()
+            env["FORTRESS_KEY_DIR"] = str(key_dir)
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+
+            result = subprocess.run(
+                [
+                    str(wrapper),
+                    str(sops_file),
+                    "--",
+                    "bash",
+                    "-lc",
+                    'test -f "$FORTRESS_KEY_DIR/media01.key" && test -f "$FORTRESS_KEY_DIR/known_hosts"',
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((key_dir / "known_hosts").is_file())
+            self.assertFalse((key_dir / "media01.key").exists())
 
     def test_pre_commit_runs_foundation_checks(self):
         pre_commit = REPO_ROOT / ".pre-commit-config.yaml"
