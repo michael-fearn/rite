@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from fortress_inventory.simple_yaml import load_yaml  # noqa: E402
+from fortress_acceptance.lifecycle import (  # noqa: E402
+    build_generated_artifact_cleanup_plan,
+    delete_generated_artifact_cleanup_plan,
+    discover_generated_artifacts,
+)
 
 
 WORKFLOWS = {"nfs-shared-mount", "service-layer"}
-
-
-@dataclass(frozen=True)
-class Artifact:
-    path: Path
-    kind: str
-    marker_purpose: str | None = None
 
 
 def main():
@@ -32,20 +28,18 @@ def main():
 
     repo_root = Path(os.environ.get("FORTRESS_ROOT", REPO_ROOT))
     workflows = sorted(WORKFLOWS) if args["workflow"] == "all" else [args["workflow"]]
-    artifacts = []
-    for workflow in workflows:
-        artifacts.extend(discover_workflow_artifacts(repo_root, workflow))
-
-    plan = build_plan(artifacts)
+    plan = build_generated_artifact_cleanup_plan(discover_generated_artifacts(repo_root, workflows))
     print_plan(plan)
     has_deletions = any(item["action"] == "delete" for item in plan)
     if has_deletions and not args["auto_confirm"] and not confirm():
         print("generated Acceptance artifact cleanup: cancelled")
         return 1
 
-    delete_plan(plan)
+    errors = delete_generated_artifact_cleanup_plan(plan)
     print_summary(plan)
-    return 0
+    for error in errors:
+        print(error, file=sys.stderr)
+    return 1 if errors else 0
 
 
 def parse_args(argv):
@@ -66,138 +60,6 @@ def parse_args(argv):
     return {"workflow": workflow, "auto_confirm": auto_confirm == "true"}
 
 
-def discover_workflow_artifacts(repo_root, workflow):
-    if workflow == "nfs-shared-mount":
-        policy = load_yaml(repo_root / "inventory" / "acceptance" / "nfs-shared-mount.yaml")
-        artifacts = []
-        for role in sorted((policy.get("vms") or {})):
-            vm_name = ((policy.get("vms") or {}).get(role) or {}).get("name")
-            if vm_name:
-                artifacts.extend(vm_artifacts(repo_root, vm_name, "nfs-shared-mount-acceptance"))
-        dataset_name = policy.get("dataset")
-        if dataset_name:
-            artifacts.append(
-                Artifact(
-                    repo_root / "inventory" / "datasets" / f"{dataset_name}.yaml",
-                    "Ephemeral Dataset YAML",
-                    "nfs-shared-mount-acceptance",
-                )
-            )
-        return artifacts
-    if workflow == "service-layer":
-        policy = load_yaml(repo_root / "inventory" / "acceptance" / "service-layer.yaml")
-        artifacts = []
-        for role in sorted((policy.get("vms") or {})):
-            vm_name = ((policy.get("vms") or {}).get(role) or {}).get("name")
-            if vm_name:
-                artifacts.extend(vm_artifacts(repo_root, vm_name, "service-layer-acceptance"))
-        artifacts.extend(
-            [
-                Artifact(
-                    repo_root / "inventory" / "services" / "tmp-service-layer.sops.yaml",
-                    "Service Sibling SOPS File",
-                ),
-                Artifact(
-                    repo_root / "inventory" / "services" / "tmp-service-layer.yaml",
-                    "Service YAML",
-                    "service-layer-acceptance",
-                ),
-                Artifact(
-                    repo_root / "inventory" / "services" / "tmp-service-layer.quadlet.d",
-                    "Quadlet Fragment directory",
-                ),
-                Artifact(
-                    repo_root / "inventory" / "services" / "tmp-service-layer-native.yaml",
-                    "Service YAML",
-                    "service-layer-acceptance",
-                ),
-                Artifact(
-                    repo_root / "inventory" / "services" / "tmp-service-layer-native.native.d",
-                    "Native Service template directory",
-                ),
-            ]
-        )
-        dataset_name = policy.get("dataset")
-        if dataset_name:
-            artifacts.append(
-                Artifact(
-                    repo_root / "inventory" / "datasets" / f"{dataset_name}.yaml",
-                    "Ephemeral Dataset YAML",
-                    "service-layer-acceptance",
-                )
-            )
-        return artifacts
-    raise ValueError(f"unsupported workflow {workflow}")
-
-
-def vm_artifacts(repo_root, vm_name, marker_purpose):
-    return [
-        Artifact(repo_root / "inventory" / "vms" / f"{vm_name}.sops.yaml", "VM Sibling SOPS File"),
-        Artifact(repo_root / "inventory" / "vms" / f"{vm_name}.yaml", "VM YAML", marker_purpose),
-    ]
-
-
-def build_plan(artifacts):
-    plan = []
-    generated_yaml_by_stem = {}
-    for artifact in artifacts:
-        if artifact.marker_purpose and artifact.path.suffix == ".yaml" and artifact.path.exists():
-            generated_yaml_by_stem[artifact.path.stem] = is_generated_yaml(artifact.path, artifact.marker_purpose)
-    for artifact in artifacts:
-        action = classify_artifact(artifact, generated_yaml_by_stem)
-        plan.append({"artifact": artifact, "action": action})
-    return plan
-
-
-def classify_artifact(artifact, generated_yaml_by_stem):
-    if not artifact.path.exists():
-        return "absent"
-    if artifact.marker_purpose:
-        return "delete" if is_generated_yaml(artifact.path, artifact.marker_purpose) else "refuse"
-    if artifact.path.name.endswith(".sops.yaml"):
-        stem = artifact.path.name.removesuffix(".sops.yaml")
-        if generated_yaml_by_stem.get(stem) is False:
-            return "refuse"
-        return "delete"
-    if artifact.path.is_dir():
-        stem = artifact.path.name.removesuffix(".quadlet.d").removesuffix(".native.d")
-        if generated_yaml_by_stem.get(stem) is False:
-            return "refuse"
-        return "delete"
-    return "refuse"
-
-
-def is_generated_yaml(path, purpose):
-    try:
-        data = load_yaml(path)
-    except Exception:
-        return False
-    lifecycle = data.get("lifecycle")
-    generated_operational = (
-        isinstance(lifecycle, dict)
-        and lifecycle.get("kind") == "operational"
-        and lifecycle.get("purpose") == purpose
-        and lifecycle.get("generated") is True
-    )
-    generated_dataset = (
-        lifecycle == "ephemeral"
-        and _has_generated_dataset_marker(path, purpose)
-    )
-    generated_entity = data.get("generated") is True and data.get("generated_by") == purpose
-    return generated_operational or generated_dataset or generated_entity
-
-
-def _has_generated_dataset_marker(path, purpose):
-    first_line = path.read_text().splitlines()[0:1]
-    if not first_line:
-        return False
-    markers = {
-        "nfs-shared-mount-acceptance": "# Generated NFS shared-mount Acceptance Dataset. Do not edit by hand.",
-        "service-layer-acceptance": "# Generated Service-layer Acceptance Dataset. Do not edit by hand.",
-    }
-    return first_line[0] == markers.get(purpose)
-
-
 def print_plan(plan):
     print("Generated Acceptance artifact cleanup plan")
     for item in plan:
@@ -211,19 +73,6 @@ def confirm():
     except EOFError:
         return False
     return response == "clean generated acceptance artifacts"
-
-
-def delete_plan(plan):
-    for item in plan:
-        if item["action"] != "delete":
-            continue
-        path = item["artifact"].path
-        if path.is_dir():
-            for child in path.iterdir():
-                child.unlink()
-            path.rmdir()
-        else:
-            path.unlink()
 
 
 def print_summary(plan):

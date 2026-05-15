@@ -12,7 +12,14 @@ FORTRESS_RUNTIME_PYTHON = Path("/opt/fortress-python/bin/python3")
 RELOAD_CREDENTIAL_ENV = "FORTRESS_SERVICE_LAYER_ACCEPTANCE_NAS_TOKEN"
 sys.path.insert(0, str(REPO_ROOT))
 
-from fortress_acceptance.lifecycle import AcceptanceTestLifecycle, phase_detail, run, ssh_check  # noqa: E402
+from fortress_acceptance.lifecycle import (  # noqa: E402
+    acceptance_artifact_lifecycle,
+    build_generated_artifact_cleanup_plan,
+    delete_generated_artifact_cleanup_plan,
+    phase_detail,
+    run,
+    ssh_check,
+)
 from fortress_inventory.model import load_inventory_tree  # noqa: E402
 
 
@@ -22,12 +29,7 @@ NATIVE_SERVICE_NAME = "tmp-service-layer-native"
 NATIVE_SERVICE_UNIT = "caddy"
 NATIVE_SERVICE_MARKER = "native-service-layer-marker"
 
-LIFECYCLE = AcceptanceTestLifecycle(
-    policy_name=POLICY_NAME,
-    artifact_label="Service-layer Acceptance",
-    purpose="service-layer-acceptance",
-    bridge_error_label="Service-layer Acceptance",
-)
+LIFECYCLE = acceptance_artifact_lifecycle(POLICY_NAME)
 
 
 def main():
@@ -48,7 +50,7 @@ def main():
     early_overwrite_check = LIFECYCLE.refuse_existing_policy_artifacts(repo_root)
     if early_overwrite_check != 0:
         return early_overwrite_check
-    early_service_overwrite_check = refuse_existing_service_artifacts(repo_root)
+    early_service_overwrite_check = LIFECYCLE.refuse_existing_registered_artifacts(repo_root)
     if early_service_overwrite_check != 0:
         return early_service_overwrite_check
 
@@ -64,7 +66,7 @@ def main():
     dataset_overwrite_check = LIFECYCLE.refuse_existing_dataset_artifact(repo_root, intent)
     if dataset_overwrite_check != 0:
         return dataset_overwrite_check
-    service_overwrite_check = refuse_existing_service_artifacts(repo_root)
+    service_overwrite_check = LIFECYCLE.refuse_existing_registered_artifacts(repo_root)
     if service_overwrite_check != 0:
         return service_overwrite_check
 
@@ -166,20 +168,6 @@ def parse_args(argv):
     return values
 
 
-def refuse_existing_service_artifacts(repo_root):
-    for path in [
-        repo_root / "inventory" / "services" / f"{SERVICE_NAME}.yaml",
-        repo_root / "inventory" / "services" / f"{SERVICE_NAME}.sops.yaml",
-        repo_root / "inventory" / "services" / f"{SERVICE_NAME}.quadlet.d",
-        repo_root / "inventory" / "services" / f"{NATIVE_SERVICE_NAME}.yaml",
-        repo_root / "inventory" / "services" / f"{NATIVE_SERVICE_NAME}.native.d",
-    ]:
-        if path.exists():
-            print(f"{path} already exists; refusing to overwrite generated Service-layer Acceptance artifact", file=sys.stderr)
-            return 1
-    return 0
-
-
 def print_intent(intent):
     print("Service-layer Acceptance Test intent")
     print(f"Host: {intent['host']}")
@@ -214,6 +202,8 @@ def write_service_yaml(path, intent):
     primary = next(vm for vm in intent["vms"] if vm["role"] == "primary")
     path.write_text(
         f"name: {SERVICE_NAME}\n"
+        "generated: true\n"
+        "generated_by: service-layer-acceptance\n"
         "service_group: service-layer-acceptance\n"
         "service_data_owner:\n"
         "  uid: 1000\n"
@@ -262,6 +252,8 @@ def write_native_service_yaml(path, intent):
     primary = next(vm for vm in intent["vms"] if vm["role"] == "primary")
     path.write_text(
         f"name: {NATIVE_SERVICE_NAME}\n"
+        "generated: true\n"
+        "generated_by: service-layer-acceptance\n"
         "backend:\n"
         f"  vm: {primary['name']}\n"
         "  port: 18080\n"
@@ -539,7 +531,7 @@ def failed_after_generation(repo_root, intent, phase, result, keep_on_fail, gene
 
 def cleanup_resources(repo_root, intent, provisioned=None, require_nas_cleanup=True):
     stderr = []
-    delete_generated_service_artifacts(repo_root, stderr)
+    delete_registered_service_artifacts(repo_root, stderr)
     cleanup = LIFECYCLE.cleanup_resources(repo_root, intent, provisioned, require_nas_cleanup=require_nas_cleanup)
     if cleanup.returncode != 0:
         stderr.append(phase_detail(cleanup))
@@ -548,30 +540,14 @@ def cleanup_resources(repo_root, intent, provisioned=None, require_nas_cleanup=T
     return subprocess.CompletedProcess([], 0, "", "")
 
 
-def delete_generated_service_artifacts(repo_root, stderr):
-    for path in [
-        repo_root / "inventory" / "services" / f"{SERVICE_NAME}.sops.yaml",
-        repo_root / "inventory" / "services" / f"{SERVICE_NAME}.yaml",
-        repo_root / "inventory" / "services" / f"{NATIVE_SERVICE_NAME}.yaml",
-    ]:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError as error:
-            stderr.append(f"failed to delete generated artifact {path}: {error}")
-    for generated_dir in [
-        repo_root / "inventory" / "services" / f"{SERVICE_NAME}.quadlet.d",
-        repo_root / "inventory" / "services" / f"{NATIVE_SERVICE_NAME}.native.d",
-    ]:
-        try:
-            for child in generated_dir.iterdir():
-                child.unlink()
-            generated_dir.rmdir()
-        except FileNotFoundError:
-            continue
-        except OSError as error:
-            stderr.append(f"failed to delete generated artifact {generated_dir}: {error}")
+def delete_registered_service_artifacts(repo_root, stderr):
+    artifacts = [artifact for artifact in LIFECYCLE.discover_generated_artifacts(repo_root) if artifact.registered]
+    plan = build_generated_artifact_cleanup_plan(artifacts)
+    refused = [item["artifact"].path for item in plan if item["action"] == "refuse"]
+    if refused:
+        stderr.extend(f"refusing to delete non-generated Service-layer Acceptance artifact {path}" for path in refused)
+        return
+    stderr.extend(delete_generated_artifact_cleanup_plan(plan))
 
 
 if __name__ == "__main__":

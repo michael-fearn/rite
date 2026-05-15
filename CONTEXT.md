@@ -499,6 +499,8 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A multi-VM **Acceptance Test** uses generated temporary **Operational VMs** rather than checked-in ordinary **VMs**.
 - A multi-VM **Acceptance Test** may designate one generated temporary **Operational VM** as the **Primary Acceptance VM** and another as the **Peer Acceptance VM**.
 - The **Acceptance Test Lifecycle** owns common generated **Ephemeral Dataset** and generated **Operational VM** artifact writing, but workflow-specific generated artifacts such as temporary **Services** remain owned by the individual **Acceptance Test**.
+- An individual **Acceptance Test** may register workflow-specific generated artifacts with the **Acceptance Test Lifecycle** for common refusal, cleanup, and failure-preservation mechanics without transferring ownership of what those artifacts mean.
+- The **Acceptance Test Lifecycle** may coordinate named workflow-specific phases, but individual **Acceptance Tests** own the phase content when it proves workflow-specific concepts.
 - The **Acceptance Test Lifecycle** owns SSH verification mechanics for generated **Operational VMs**, including Ansible host variable loading, key decryption, retry timing, remote sudo invocation, expected output checks, and failure formatting.
 - Individual **Acceptance Tests** declare the VM checks that prove their operator-facing contract; they do not own the SSH transport mechanics.
 - The **Acceptance Test Lifecycle** owns **NAS Reconcile** create/destroy calls for its **Ephemeral Dataset** and derived **Shares**, including cleanup postcondition assertions.

@@ -88,6 +88,61 @@ class AcceptanceLifecycleTests(unittest.TestCase):
             self.assertIn("purpose: service-layer-acceptance", primary_yaml)
             self.assertIn("dataset: acceptance-service-layer", primary_yaml)
 
+    def test_lifecycle_plans_cleanup_for_common_and_registered_service_artifacts(self):
+        from fortress_acceptance.lifecycle import acceptance_artifact_lifecycle, build_generated_artifact_cleanup_plan
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            (root / "inventory" / "services").mkdir()
+            (root / "inventory" / "acceptance" / "service-layer.yaml").write_text(
+                "dataset: acceptance-service-layer\n"
+                "vms:\n"
+                "  primary:\n"
+                "    name: tmp-service-primary\n"
+                "  peer:\n"
+                "    name: tmp-service-peer\n"
+            )
+            generated_vm = root / "inventory" / "vms" / "tmp-service-primary.yaml"
+            generated_vm.write_text(
+                "lifecycle:\n"
+                "  kind: operational\n"
+                "  purpose: service-layer-acceptance\n"
+                "  generated: true\n"
+            )
+            sibling_sops = root / "inventory" / "vms" / "tmp-service-primary.sops.yaml"
+            sibling_sops.write_text("sops: generated\n")
+            ordinary_peer = root / "inventory" / "vms" / "tmp-service-peer.yaml"
+            ordinary_peer.write_text("lifecycle:\n  kind: ordinary\n")
+            service_sops = root / "inventory" / "services" / "tmp-service-layer.sops.yaml"
+            service_sops.write_text("secrets: {}\n")
+            quadlet_dir = root / "inventory" / "services" / "tmp-service-layer.quadlet.d"
+            quadlet_dir.mkdir()
+            (quadlet_dir / "web.container").write_text("[Container]\n")
+
+            artifacts = acceptance_artifact_lifecycle("service-layer").discover_generated_artifacts(root)
+            plan = build_generated_artifact_cleanup_plan(artifacts)
+            actions = {item["artifact"].path.relative_to(root).as_posix(): item["action"] for item in plan}
+
+            self.assertEqual("delete", actions["inventory/vms/tmp-service-primary.yaml"])
+            self.assertEqual("delete", actions["inventory/vms/tmp-service-primary.sops.yaml"])
+            self.assertEqual("refuse", actions["inventory/vms/tmp-service-peer.yaml"])
+            self.assertEqual("delete", actions["inventory/services/tmp-service-layer.sops.yaml"])
+            self.assertEqual("delete", actions["inventory/services/tmp-service-layer.quadlet.d"])
+
+    def test_lifecycle_refuses_ambiguous_unregistered_sibling_sops_without_generated_yaml(self):
+        from fortress_acceptance.lifecycle import acceptance_artifact_lifecycle, build_generated_artifact_cleanup_plan
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            ambiguous_sops = root / "inventory" / "vms" / "tmp-nfs-primary.sops.yaml"
+            ambiguous_sops.write_text("sops: maybe ordinary\n")
+
+            artifacts = acceptance_artifact_lifecycle("nfs-shared-mount").discover_generated_artifacts(root)
+            plan = build_generated_artifact_cleanup_plan(artifacts)
+            actions = {item["artifact"].path.relative_to(root).as_posix(): item["action"] for item in plan}
+
+            self.assertEqual("refuse", actions["inventory/vms/tmp-nfs-primary.sops.yaml"])
+
     def _fixture(self, tmp):
         root = Path(tmp)
         inventory = root / "inventory"

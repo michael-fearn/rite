@@ -5,8 +5,18 @@ import shlex
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 
 from fortress_inventory.simple_yaml import load_yaml
+
+
+@dataclass(frozen=True)
+class GeneratedArtifact:
+    path: object
+    kind: str
+    marker_purpose: str | None = None
+    paired_yaml_path: object | None = None
+    registered: bool = False
 
 
 class AcceptanceTestLifecycle:
@@ -16,6 +26,43 @@ class AcceptanceTestLifecycle:
         self.purpose = purpose
         self.roles = roles
         self.bridge_error_label = bridge_error_label or artifact_label
+        self.registered_generated_artifacts = []
+
+    def register_generated_artifact(self, path, kind, marker_purpose=None):
+        artifact = GeneratedArtifact(path, kind, marker_purpose, registered=True)
+        self.registered_generated_artifacts.append(artifact)
+        return artifact
+
+    def discover_generated_artifacts(self, repo_root):
+        policy_path = repo_root / "inventory" / "acceptance" / f"{self.policy_name}.yaml"
+        policy = load_yaml(policy_path)
+        artifacts = []
+        for role in sorted((policy.get("vms") or {})):
+            vm_name = ((policy.get("vms") or {}).get(role) or {}).get("name")
+            if vm_name:
+                artifacts.extend(self.vm_generated_artifacts(repo_root, vm_name))
+        dataset_name = policy.get("dataset")
+        if dataset_name:
+            artifacts.append(
+                GeneratedArtifact(
+                    repo_root / "inventory" / "datasets" / f"{dataset_name}.yaml",
+                    "Ephemeral Dataset YAML",
+                    self.purpose,
+                )
+            )
+        artifacts.extend(self.registered_generated_artifacts)
+        return _resolve_artifact_paths(repo_root, artifacts)
+
+    def vm_generated_artifacts(self, repo_root, vm_name):
+        yaml_path = repo_root / "inventory" / "vms" / f"{vm_name}.yaml"
+        return [
+            GeneratedArtifact(
+                repo_root / "inventory" / "vms" / f"{vm_name}.sops.yaml",
+                "VM Sibling SOPS File",
+                paired_yaml_path=yaml_path,
+            ),
+            GeneratedArtifact(yaml_path, "VM YAML", self.purpose),
+        ]
 
     def resolve_intent(self, repo_root, inventory, args):
         host_name = args["host"]
@@ -113,6 +160,13 @@ class AcceptanceTestLifecycle:
         if path.exists():
             print(f"{path} already exists; refusing to overwrite generated {self.artifact_label} artifact", file=sys.stderr)
             return 1
+        return 0
+
+    def refuse_existing_registered_artifacts(self, repo_root):
+        for artifact in _resolve_artifact_paths(repo_root, self.registered_generated_artifacts):
+            if artifact.path.exists():
+                print(f"{artifact.path} already exists; refusing to overwrite generated {self.artifact_label} artifact", file=sys.stderr)
+                return 1
         return 0
 
     def refuse_existing_artifacts(self, repo_root, vms):
@@ -376,6 +430,137 @@ class AcceptanceTestLifecycle:
 
     def share_name(self, intent):
         return f"fortress-nfs-{intent['dataset']['name']}-{intent['policy']['mount']['access'].replace('_', '-')}"
+
+
+def acceptance_artifact_lifecycle(workflow):
+    if workflow == "nfs-shared-mount":
+        return AcceptanceTestLifecycle(
+            policy_name="nfs-shared-mount",
+            artifact_label="NFS shared-mount Acceptance",
+            purpose="nfs-shared-mount-acceptance",
+            bridge_error_label="NFS Acceptance",
+        )
+    if workflow == "service-layer":
+        lifecycle = AcceptanceTestLifecycle(
+            policy_name="service-layer",
+            artifact_label="Service-layer Acceptance",
+            purpose="service-layer-acceptance",
+            bridge_error_label="Service-layer Acceptance",
+        )
+        services = "inventory/services"
+        for relative_path, kind, marker_purpose in [
+            ("tmp-service-layer.sops.yaml", "Service Sibling SOPS File", None),
+            ("tmp-service-layer.yaml", "Service YAML", "service-layer-acceptance"),
+            ("tmp-service-layer.quadlet.d", "Quadlet Fragment directory", None),
+            ("tmp-service-layer-native.yaml", "Service YAML", "service-layer-acceptance"),
+            ("tmp-service-layer-native.native.d", "Native Service template directory", None),
+        ]:
+            lifecycle.register_generated_artifact(
+                lambda repo_root, relative_path=relative_path: repo_root / services / relative_path,
+                kind,
+                marker_purpose,
+            )
+        return lifecycle
+    raise ValueError(f"unsupported workflow {workflow}")
+
+
+def discover_generated_artifacts(repo_root, workflows):
+    artifacts = []
+    for workflow in workflows:
+        lifecycle = acceptance_artifact_lifecycle(workflow)
+        artifacts.extend(_resolve_artifact_paths(repo_root, lifecycle.discover_generated_artifacts(repo_root)))
+    return artifacts
+
+
+def _resolve_artifact_paths(repo_root, artifacts):
+    resolved = []
+    for artifact in artifacts:
+        path = artifact.path(repo_root) if callable(artifact.path) else artifact.path
+        paired_yaml_path = artifact.paired_yaml_path(repo_root) if callable(artifact.paired_yaml_path) else artifact.paired_yaml_path
+        resolved.append(
+            GeneratedArtifact(
+                path,
+                artifact.kind,
+                artifact.marker_purpose,
+                paired_yaml_path,
+                artifact.registered,
+            )
+        )
+    return resolved
+
+
+def build_generated_artifact_cleanup_plan(artifacts):
+    plan = []
+    generated_yaml_by_path = {}
+    for artifact in artifacts:
+        if artifact.marker_purpose and artifact.path.suffix == ".yaml" and artifact.path.exists():
+            generated_yaml_by_path[artifact.path] = is_generated_acceptance_yaml(artifact.path, artifact.marker_purpose)
+    for artifact in artifacts:
+        action = classify_generated_artifact(artifact, generated_yaml_by_path)
+        plan.append({"artifact": artifact, "action": action})
+    return plan
+
+
+def classify_generated_artifact(artifact, generated_yaml_by_path):
+    if not artifact.path.exists():
+        return "absent"
+    if artifact.marker_purpose:
+        return "delete" if is_generated_acceptance_yaml(artifact.path, artifact.marker_purpose) else "refuse"
+    if artifact.registered:
+        return "delete"
+    if artifact.paired_yaml_path:
+        return "delete" if generated_yaml_by_path.get(artifact.paired_yaml_path) is True else "refuse"
+    return "refuse"
+
+
+def is_generated_acceptance_yaml(path, purpose):
+    try:
+        data = load_yaml(path)
+    except Exception:
+        return False
+    lifecycle = data.get("lifecycle")
+    generated_operational = (
+        isinstance(lifecycle, dict)
+        and lifecycle.get("kind") == "operational"
+        and lifecycle.get("purpose") == purpose
+        and lifecycle.get("generated") is True
+    )
+    generated_dataset = lifecycle == "ephemeral" and has_generated_dataset_marker(path, purpose)
+    generated_entity = data.get("generated") is True and data.get("generated_by") == purpose
+    return generated_operational or generated_dataset or generated_entity
+
+
+def has_generated_dataset_marker(path, purpose):
+    first_line = path.read_text().splitlines()[0:1]
+    if not first_line:
+        return False
+    markers = {
+        "nfs-shared-mount-acceptance": "# Generated NFS shared-mount Acceptance Dataset. Do not edit by hand.",
+        "service-layer-acceptance": "# Generated Service-layer Acceptance Dataset. Do not edit by hand.",
+    }
+    return first_line[0] == markers.get(purpose)
+
+
+def delete_generated_artifact_cleanup_plan(plan):
+    errors = []
+    for item in plan:
+        if item["action"] != "delete":
+            continue
+        path = item["artifact"].path
+        try:
+            delete_generated_artifact_path(path)
+        except OSError as error:
+            errors.append(f"failed to delete generated artifact {path}: {error}")
+    return errors
+
+
+def delete_generated_artifact_path(path):
+    if path.is_dir():
+        for child in path.iterdir():
+            child.unlink()
+        path.rmdir()
+    else:
+        path.unlink()
 
 
 def ssh_check(vm, remote_command, expected_stdout=None):
