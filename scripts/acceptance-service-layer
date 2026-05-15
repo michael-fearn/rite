@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import hashlib
-import ipaddress
-import json
 import os
 import shlex
 import subprocess
@@ -14,8 +12,8 @@ FORTRESS_RUNTIME_PYTHON = Path("/opt/fortress-python/bin/python3")
 RELOAD_CREDENTIAL_ENV = "FORTRESS_SERVICE_LAYER_ACCEPTANCE_NAS_TOKEN"
 sys.path.insert(0, str(REPO_ROOT))
 
+from fortress_acceptance.lifecycle import AcceptanceTestLifecycle, phase_detail, run, ssh_check  # noqa: E402
 from fortress_inventory.model import load_inventory_tree  # noqa: E402
-from fortress_inventory.simple_yaml import load_yaml  # noqa: E402
 
 
 POLICY_NAME = "service-layer"
@@ -23,7 +21,13 @@ SERVICE_NAME = "tmp-service-layer"
 NATIVE_SERVICE_NAME = "tmp-service-layer-native"
 NATIVE_SERVICE_UNIT = "caddy"
 NATIVE_SERVICE_MARKER = "native-service-layer-marker"
-ROLES = ("primary", "peer")
+
+LIFECYCLE = AcceptanceTestLifecycle(
+    policy_name=POLICY_NAME,
+    artifact_label="Service-layer Acceptance",
+    purpose="service-layer-acceptance",
+    bridge_error_label="Service-layer Acceptance",
+)
 
 
 def main():
@@ -41,28 +45,28 @@ def main():
         return 2
 
     repo_root = Path(os.environ.get("FORTRESS_ROOT", REPO_ROOT))
-    early_overwrite_check = refuse_existing_artifacts(
-        repo_root,
-        [{"name": "tmp-service-primary"}, {"name": "tmp-service-peer"}],
-    )
+    early_overwrite_check = LIFECYCLE.refuse_existing_policy_artifacts(repo_root)
     if early_overwrite_check != 0:
         return early_overwrite_check
-    early_dataset_overwrite_check = refuse_existing_policy_dataset_artifact(repo_root)
-    if early_dataset_overwrite_check != 0:
-        return early_dataset_overwrite_check
+    early_service_overwrite_check = refuse_existing_service_artifacts(repo_root)
+    if early_service_overwrite_check != 0:
+        return early_service_overwrite_check
 
     inventory = load_inventory_tree(repo_root)
-    resolved = resolve_intent(repo_root, inventory, args)
+    resolved = LIFECYCLE.resolve_intent(repo_root, inventory, args)
     if isinstance(resolved, int):
         return resolved
     intent = resolved
 
-    overwrite_check = refuse_existing_artifacts(repo_root, intent["vms"])
+    overwrite_check = LIFECYCLE.refuse_existing_artifacts(repo_root, intent["vms"])
     if overwrite_check != 0:
         return overwrite_check
-    dataset_overwrite_check = refuse_existing_dataset_artifact(repo_root, intent)
+    dataset_overwrite_check = LIFECYCLE.refuse_existing_dataset_artifact(repo_root, intent)
     if dataset_overwrite_check != 0:
         return dataset_overwrite_check
+    service_overwrite_check = refuse_existing_service_artifacts(repo_root)
+    if service_overwrite_check != 0:
+        return service_overwrite_check
 
     print_intent(intent)
     if not args["auto_confirm"] and not confirm():
@@ -80,7 +84,7 @@ def main():
         if encryption.returncode != 0:
             return failed_after_generation(repo_root, intent, "Service Sibling SOPS File encryption", encryption, args["keep_on_fail"], generated, provisioned, require_nas_cleanup=False)
         progress(f"reconciling Ephemeral Dataset and Derived NFS Share on NAS Endpoint {intent['endpoint']}")
-        reconcile = run_reconcile(repo_root, intent, destroy=False)
+        reconcile = LIFECYCLE.run_reconcile(repo_root, intent, destroy=False)
         if reconcile.returncode != 0:
             return failed_after_generation(
                 repo_root,
@@ -92,21 +96,19 @@ def main():
                 provisioned,
                 require_nas_cleanup=False,
             )
-        assertion = assert_reconcile_share(reconcile.stdout, intent)
+        assertion = LIFECYCLE.assert_reconcile_share(reconcile.stdout, intent)
         if assertion:
             return failed_after_generation(repo_root, intent, "NAS Reconcile assertion", assertion, args["keep_on_fail"], generated, provisioned)
 
-        for vm in intent["vms"]:
-            progress(f"provisioning {vm['role']} Acceptance VM {vm['name']}")
-            command = [str(repo_root / "scripts" / "vm-up"), vm["name"]]
-            provisioned.append(vm["name"])
-            if args["auto_confirm"]:
-                command.append("--auto-confirm")
-                up = run(command)
-            else:
-                up = run(command, input_text=f"apply {vm['name']}\n")
-            if up.returncode != 0:
-                return failed_after_generation(repo_root, intent, f"vm-up {vm['name']}", up, args["keep_on_fail"], generated, provisioned)
+        failed_vm, up = LIFECYCLE.provision_vms(
+            repo_root,
+            intent,
+            args["auto_confirm"],
+            provisioned,
+            progress=lambda vm: progress(f"provisioning {vm['role']} Acceptance VM {vm['name']}"),
+        )
+        if up.returncode != 0:
+            return failed_after_generation(repo_root, intent, f"vm-up {failed_vm['name']}", up, args["keep_on_fail"], generated, provisioned)
 
         progress(f"deploying generated Service {SERVICE_NAME} to {intent['vms'][0]['name']}")
         service_deploy = run_service_deploy(repo_root, intent)
@@ -164,94 +166,7 @@ def parse_args(argv):
     return values
 
 
-def resolve_intent(repo_root, inventory, args):
-    host_name = args["host"]
-    template_name = args["template"]
-    endpoint_name = args["endpoint"]
-    host = inventory.hosts.get(host_name)
-    if not host:
-        print(f"Host {host_name!r} is not declared at {repo_root / 'inventory' / 'hosts' / f'{host_name}.yaml'}", file=sys.stderr)
-        return 1
-    if template_name not in inventory.templates:
-        print(f"Template {template_name!r} is not declared at {repo_root / 'inventory' / 'templates' / f'{template_name}.yaml'}", file=sys.stderr)
-        return 1
-    if template_name not in (host.get("proxmox", {}).get("templates", []) or []):
-        print(f"Host {host_name} does not declare Template {template_name} under proxmox.templates", file=sys.stderr)
-        return 1
-    if endpoint_name not in inventory.nas_endpoints:
-        print(f"NAS Endpoint {endpoint_name!r} is not declared at {repo_root / 'inventory' / 'nas' / f'{endpoint_name}.yaml'}", file=sys.stderr)
-        return 1
-    endpoint = inventory.nas_endpoints[endpoint_name]
-    policy = inventory.acceptance_policies.get(POLICY_NAME)
-    if not policy:
-        print(f"Acceptance Policy {POLICY_NAME!r} is not declared at {repo_root / 'inventory' / 'acceptance' / f'{POLICY_NAME}.yaml'}", file=sys.stderr)
-        return 1
-    dataset = acceptance_dataset(policy, endpoint_name)
-    if host_name not in (policy.get("storage_by_host", {}) or {}):
-        print(f"Acceptance Policy {POLICY_NAME} has no storage_by_host entry for Host {host_name}", file=sys.stderr)
-        return 1
-    bridge = derive_bridge(host_name, host, policy, ROLES[0])
-    if isinstance(bridge, int):
-        return bridge
-
-    vms = []
-    for role in ROLES:
-        declaration = (policy.get("vms", {}) or {}).get(role, {})
-        address = (declaration.get("address_by_host", {}) or {}).get(host_name)
-        if not address:
-            print(f"Acceptance Policy {POLICY_NAME} has no {role} address_by_host entry for Host {host_name}", file=sys.stderr)
-            return 1
-        role_bridge = derive_bridge(host_name, host, policy, role)
-        if isinstance(role_bridge, int):
-            return role_bridge
-        vms.append(
-            {
-                "role": role,
-                "name": declaration.get("name"),
-                "vmid": declaration.get("vmid"),
-                "address": address,
-                "client": str(ipaddress.ip_interface(address).ip),
-                "bridge": role_bridge,
-            }
-        )
-    return {
-        "host": host_name,
-        "template": template_name,
-        "endpoint": endpoint_name,
-        "endpoint_config": endpoint,
-        "policy": policy,
-        "dataset": dataset,
-        "vms": vms,
-    }
-
-
-def derive_bridge(host_name, host, policy, role):
-    declaration = (policy.get("vms", {}) or {}).get(role, {})
-    address = (declaration.get("address_by_host", {}) or {}).get(host_name)
-    if not address:
-        return 1
-    vm_ip = ipaddress.ip_interface(address).ip
-    matches = []
-    for bridge in host.get("network", {}).get("bridges", []) or []:
-        cidr = bridge.get("cidr")
-        if cidr and vm_ip in ipaddress.ip_network(cidr, strict=False):
-            matches.append(bridge)
-    if len(matches) != 1:
-        print(f"{role} VM address {address} must match exactly one Host bridge CIDR; found {len(matches)}", file=sys.stderr)
-        return 1
-    if not matches[0].get("gateway"):
-        print(f"Host {host_name} bridge {matches[0].get('name')} has no gateway for generated Service-layer Acceptance VM", file=sys.stderr)
-        return 1
-    return matches[0]
-
-
-def refuse_existing_artifacts(repo_root, vms):
-    for vm in vms:
-        for suffix in (".yaml", ".sops.yaml"):
-            path = repo_root / "inventory" / "vms" / f"{vm['name']}{suffix}"
-            if path.exists():
-                print(f"{path} already exists; refusing to overwrite generated Service-layer Acceptance artifact", file=sys.stderr)
-                return 1
+def refuse_existing_service_artifacts(repo_root):
     for path in [
         repo_root / "inventory" / "services" / f"{SERVICE_NAME}.yaml",
         repo_root / "inventory" / "services" / f"{SERVICE_NAME}.sops.yaml",
@@ -262,29 +177,6 @@ def refuse_existing_artifacts(repo_root, vms):
         if path.exists():
             print(f"{path} already exists; refusing to overwrite generated Service-layer Acceptance artifact", file=sys.stderr)
             return 1
-    return 0
-
-
-def refuse_existing_dataset_artifact(repo_root, intent):
-    path = dataset_artifact_path(repo_root, intent)
-    if path.exists():
-        print(f"{path} already exists; refusing to overwrite generated Service-layer Acceptance artifact", file=sys.stderr)
-        return 1
-    return 0
-
-
-def refuse_existing_policy_dataset_artifact(repo_root):
-    policy_path = repo_root / "inventory" / "acceptance" / f"{POLICY_NAME}.yaml"
-    if not policy_path.is_file():
-        return 0
-    policy = load_yaml(policy_path)
-    dataset_name = policy.get("dataset")
-    if not dataset_name:
-        return 0
-    path = repo_root / "inventory" / "datasets" / f"{dataset_name}.yaml"
-    if path.exists():
-        print(f"{path} already exists; refusing to overwrite generated Service-layer Acceptance artifact", file=sys.stderr)
-        return 1
     return 0
 
 
@@ -308,80 +200,13 @@ def confirm():
 
 
 def write_generated_inventory(repo_root, intent):
-    write_generated_dataset(repo_root, intent)
-    for vm in intent["vms"]:
-        write_vm_yaml(repo_root / "inventory" / "vms" / f"{vm['name']}.yaml", intent, vm)
+    LIFECYCLE.write_generated_dataset(repo_root, intent)
+    LIFECYCLE.write_generated_vms(repo_root, intent)
     write_service_yaml(repo_root / "inventory" / "services" / f"{SERVICE_NAME}.yaml", intent)
     write_service_sops(repo_root, repo_root / "inventory" / "services" / f"{SERVICE_NAME}.sops.yaml")
     write_service_quadlet_fragment(repo_root / "inventory" / "services" / f"{SERVICE_NAME}.quadlet.d")
     write_native_service_yaml(repo_root / "inventory" / "services" / f"{NATIVE_SERVICE_NAME}.yaml", intent)
     write_native_service_templates(repo_root / "inventory" / "services" / f"{NATIVE_SERVICE_NAME}.native.d")
-
-
-def write_generated_dataset(repo_root, intent):
-    dataset = intent["dataset"]
-    dataset_artifact_path(repo_root, intent).write_text(
-        "# Generated Service-layer Acceptance Dataset. Do not edit by hand.\n"
-        f"name: {dataset['name']}\n"
-        f"nas: {dataset['nas']}\n"
-        f"path: {dataset['path']}\n"
-        "lifecycle: ephemeral\n"
-    )
-
-
-def acceptance_dataset(policy, endpoint_name):
-    dataset_name = policy.get("dataset")
-    mount = policy.get("mount", {}) or {}
-    return {
-        "name": dataset_name,
-        "nas": endpoint_name,
-        "path": f"/mnt/tank/fortress-acceptance/{mount.get('name')}",
-        "lifecycle": "ephemeral",
-    }
-
-
-def dataset_artifact_path(repo_root, intent):
-    return repo_root / "inventory" / "datasets" / f"{intent['dataset']['name']}.yaml"
-
-
-def write_vm_yaml(path, intent, vm):
-    policy = intent["policy"]
-    hardware = policy["hardware"]
-    mount = policy["mount"]
-    storage = policy["storage_by_host"][intent["host"]]
-    path.write_text(
-        f"vmid: {vm['vmid']}\n"
-        "description: Generated Service-layer Acceptance VM. Do not edit by hand.\n"
-        "lifecycle:\n"
-        "  kind: operational\n"
-        "  purpose: service-layer-acceptance\n"
-        "  generated: true\n"
-        "placement:\n"
-        f"  host: {intent['host']}\n"
-        "source:\n"
-        f"  template: {intent['template']}\n"
-        "hardware:\n"
-        f"  cores: {hardware['cores']}\n"
-        f"  memory: {hardware['memory']}\n"
-        "  disks:\n"
-        f"    - storage: {storage}\n"
-        f"      size: {hardware['disk_size']}\n"
-        "network:\n"
-        "  interfaces:\n"
-        f"    - bridge: {vm['bridge']['name']}\n"
-        f"      address: {vm['address']}\n"
-        f"      gateway: {vm['bridge']['gateway']}\n"
-        "cloud_init:\n"
-        f"  hostname: {vm['name']}\n"
-        "mounts:\n"
-        f"  - name: {mount['name']}\n"
-        f"    dataset: {intent['dataset']['name']}\n"
-        "    protocol: nfs\n"
-        f"    mount_point: {mount['mount_point']}\n"
-        f"    access: {mount['access']}\n"
-        "backup:\n"
-        "  enabled: false\n"
-    )
 
 
 def write_service_yaml(path, intent):
@@ -492,42 +317,6 @@ def write_native_service_templates(path):
         f"\trespond \"{NATIVE_SERVICE_MARKER}\"\n"
         "}\n"
     )
-
-
-def run_reconcile(repo_root, intent, destroy):
-    command = [
-        str(repo_root / "scripts" / "nas-reconcile-plan"),
-        "--live",
-        intent["endpoint"],
-        "--acceptance-ephemeral-datasets",
-    ]
-    if destroy:
-        command.append("--destroy-ephemeral-datasets")
-    command.append("--apply")
-    return run(command)
-
-
-def assert_reconcile_share(stdout, intent):
-    try:
-        payload = json.loads(stdout or "{}")
-    except json.JSONDecodeError as error:
-        return subprocess.CompletedProcess([], 1, "", f"reconcile output was not JSON: {error}")
-    expected_clients = sorted(vm["client"] for vm in intent["vms"])
-    expected_name = f"fortress-nfs-{intent['dataset']['name']}-{intent['policy']['mount']['access'].replace('_', '-')}"
-    matches = [
-        share for share in payload.get("desired_nfs_shares", []) or []
-        if share.get("name") == expected_name
-        and share.get("dataset") == intent["dataset"]["name"]
-        and set(expected_clients) <= set(share.get("clients", []))
-    ]
-    if len(matches) != 1:
-        return subprocess.CompletedProcess(
-            [],
-            1,
-            "",
-            f"expected one Derived NFS Share {expected_name} with clients {expected_clients}",
-        )
-    return None
 
 
 def run_service_deploy(repo_root, intent):
@@ -641,9 +430,7 @@ def sops_extract_acceptance_credential(endpoint_sops):
 
 
 def verify_service_layer(repo_root, intent):
-    hostvars = load_hostvars(repo_root)
     mount_point = intent["policy"]["mount"]["mount_point"]
-    unit = systemd_mount_unit(mount_point)
     checks = []
     primary, peer = intent["vms"]
     marker = os.environ.get("FORTRESS_SERVICE_LAYER_MARKER", f"fortress-service-layer-{int(time.time())}")
@@ -656,43 +443,40 @@ def verify_service_layer(repo_root, intent):
     ]
     checks.extend(
         [
-            ("checking Primary Acceptance VM mount unit", primary, ["systemctl", "is-active", unit], None),
-            ("checking Primary Acceptance VM NFS mount", primary, ["findmnt", mount_point], None),
-            ("writing marker through Share-backed Volume", primary, ["sh", "-lc", f"printf {shlex.quote(marker)} > {shlex.quote(marker_file)}"], None),
+            {"description": "checking Primary Acceptance VM mount unit", **LIFECYCLE.mount_health_checks(intent)[0]},
+            {"description": "checking Primary Acceptance VM NFS mount", **LIFECYCLE.mount_health_checks(intent)[1]},
+            {"description": "writing marker through Share-backed Volume", **ssh_check(primary, ["sh", "-lc", f"printf {shlex.quote(marker)} > {shlex.quote(marker_file)}"])},
             *[
-                (f"checking Service unit {service_unit}", primary, ["systemctl", "is-active", service_unit], None)
+                {"description": f"checking Service unit {service_unit}", **ssh_check(primary, ["systemctl", "is-active", service_unit])}
                 for service_unit in service_units
             ],
-            ("checking postgres Container Alias from web container", primary, ["podman", "exec", f"fortress-{SERVICE_NAME}-web", "getent", "hosts", "postgres"], None),
-            ("checking redis Container Alias from web container", primary, ["podman", "exec", f"fortress-{SERVICE_NAME}-web", "getent", "hosts", "redis"], None),
-            (
-                "checking Service Secret bytes inside web container",
-                primary,
-                [
+            {"description": "checking postgres Container Alias from web container", **ssh_check(primary, ["podman", "exec", f"fortress-{SERVICE_NAME}-web", "getent", "hosts", "postgres"])},
+            {"description": "checking redis Container Alias from web container", **ssh_check(primary, ["podman", "exec", f"fortress-{SERVICE_NAME}-web", "getent", "hosts", "redis"])},
+            {
+                "description": "checking Service Secret bytes inside web container",
+                **ssh_check(
+                    primary,
+                    [
                     "podman",
                     "exec",
                     f"fortress-{SERVICE_NAME}-web",
                     "sh",
                     "-lc",
                     "sha256sum \"$ACCEPTANCE_TOKEN_FILE\" | awk '{print $1}'",
-                ],
-                expected_secret_hash,
-            ),
-            ("checking peer-to-primary Published Port reachability", peer, ["curl", "-fsS", f"http://{primary['client']}:8080/"], marker),
-            ("checking Native Service systemd unit caddy", primary, ["systemctl", "is-active", NATIVE_SERVICE_UNIT], None),
-            ("checking peer-to-primary Native Service reachability", peer, ["curl", "-fsS", f"http://{primary['client']}:18080/"], NATIVE_SERVICE_MARKER),
+                    ],
+                    expected_secret_hash,
+                ),
+            },
+            {"description": "checking peer-to-primary Published Port reachability", **ssh_check(peer, ["curl", "-fsS", f"http://{primary['client']}:8080/"], marker)},
+            {"description": "checking Native Service systemd unit caddy", **ssh_check(primary, ["systemctl", "is-active", NATIVE_SERVICE_UNIT])},
+            {"description": "checking peer-to-primary Native Service reachability", **ssh_check(peer, ["curl", "-fsS", f"http://{primary['client']}:18080/"], NATIVE_SERVICE_MARKER)},
         ]
     )
-    for description, vm, remote_command, expected_stdout in checks:
-        progress(description)
-        result = verify_ssh_check(repo_root, vm["name"], hostvars, remote_command, expected_stdout)
-        if result.returncode != 0:
-            return result
-    return subprocess.CompletedProcess([], 0, "", "")
+    return LIFECYCLE.verify_named_checks(repo_root, checks, progress)
 
 
 def verify_post_reload_data_flow(repo_root, intent):
-    hostvars = load_hostvars(repo_root)
+    hostvars = LIFECYCLE.load_verification_hostvars(repo_root)
     mount_point = intent["policy"]["mount"]["mount_point"]
     primary, peer = intent["vms"]
     marker = os.environ.get("FORTRESS_SERVICE_LAYER_POST_RELOAD_MARKER", "post-reload-service-layer-marker")
@@ -701,133 +485,41 @@ def verify_post_reload_data_flow(repo_root, intent):
     index_file = f"{mount_point}/index.html"
     marker_written = False
     checks = [
-        (
-            "writing fresh post-reload marker through Primary Acceptance VM Mount",
-            primary,
-            ["sh", "-lc", f"printf {shlex.quote(marker)} > {shlex.quote(marker_file)}"],
-            None,
-            True,
-        ),
-        (
-            "reading fresh post-reload marker through Peer Acceptance VM Mount",
-            peer,
-            ["cat", marker_file],
-            marker,
-            False,
-        ),
-        (
-            "updating Service-served index.html through Primary Acceptance VM Mount",
-            primary,
-            ["sh", "-lc", f"printf {shlex.quote(service_content)} > {shlex.quote(index_file)}"],
-            None,
-            False,
-        ),
-        (
-            "checking already-running Service serves fresh post-reload content",
-            peer,
-            ["curl", "-fsS", f"http://{primary['client']}:8080/"],
-            service_content,
-            False,
-        ),
+        {
+            "description": "writing fresh post-reload marker through Primary Acceptance VM Mount",
+            "creates_marker": True,
+            **ssh_check(primary, ["sh", "-lc", f"printf {shlex.quote(marker)} > {shlex.quote(marker_file)}"]),
+        },
+        {
+            "description": "reading fresh post-reload marker through Peer Acceptance VM Mount",
+            "creates_marker": False,
+            **ssh_check(peer, ["cat", marker_file], marker),
+        },
+        {
+            "description": "updating Service-served index.html through Primary Acceptance VM Mount",
+            "creates_marker": False,
+            **ssh_check(primary, ["sh", "-lc", f"printf {shlex.quote(service_content)} > {shlex.quote(index_file)}"]),
+        },
+        {
+            "description": "checking already-running Service serves fresh post-reload content",
+            "creates_marker": False,
+            **ssh_check(peer, ["curl", "-fsS", f"http://{primary['client']}:8080/"], service_content),
+        },
     ]
-    for description, vm, remote_command, expected_stdout, creates_marker in checks:
-        progress(description)
-        result = verify_ssh_check(repo_root, vm["name"], hostvars, remote_command, expected_stdout)
+    for check in checks:
+        progress(check["description"])
+        result = LIFECYCLE.verify_check(repo_root, hostvars, check)
         if result.returncode != 0:
             if marker_written:
                 cleanup_post_reload_marker(repo_root, primary, hostvars, marker_file)
             return result
-        marker_written = marker_written or creates_marker
+        marker_written = marker_written or check["creates_marker"]
     return cleanup_post_reload_marker(repo_root, primary, hostvars, marker_file)
 
 
 def cleanup_post_reload_marker(repo_root, primary, hostvars, marker_file):
     progress("removing fresh post-reload marker from Primary Acceptance VM Mount")
-    return verify_ssh_check(repo_root, primary["name"], hostvars, ["rm", "-f", marker_file], None)
-
-
-def verify_ssh_check(repo_root, vm_name, hostvars, remote_command, expected_stdout):
-    attempts = int(os.environ.get("FORTRESS_VERIFY_RETRIES", "12"))
-    delay = float(os.environ.get("FORTRESS_VERIFY_RETRY_DELAY", "5"))
-    last_result = subprocess.CompletedProcess(remote_command, 1, "", "")
-    for attempt in range(attempts):
-        result = ssh_root(repo_root, vm_name, hostvars, remote_command)
-        if result.returncode == 0 and (expected_stdout is None or result.stdout.strip() == expected_stdout):
-            return result
-        if expected_stdout is not None and result.returncode == 0:
-            result = subprocess.CompletedProcess(
-                remote_command,
-                1,
-                result.stdout,
-                f"expected {expected_stdout!r}, got {result.stdout.strip()!r}",
-            )
-        last_result = result
-        if attempt + 1 < attempts:
-            time.sleep(delay)
-    return last_result
-
-
-def systemd_mount_unit(mount_point):
-    normalized = "/".join(part for part in str(mount_point).split("/") if part)
-    if not normalized:
-        return "-.mount"
-
-    escaped = []
-    at_start = True
-    for char in normalized:
-        if char == "/":
-            escaped.append("-")
-            at_start = True
-            continue
-        allowed = char.isalnum() or char in ":_."
-        if allowed and not (at_start and char == "."):
-            escaped.append(char)
-        else:
-            escaped.extend(f"\\x{byte:02x}" for byte in char.encode())
-        at_start = False
-    return f"{''.join(escaped)}.mount"
-
-
-def load_hostvars(repo_root):
-    result = subprocess.run(
-        ["ansible-inventory", "-i", str(repo_root / "inventory" / "fortress.yaml"), "--list"],
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-    )
-    return json.loads(result.stdout).get("_meta", {}).get("hostvars", {})
-
-
-def ssh_root(repo_root, vm_name, hostvars, remote_command):
-    vm_vars = hostvars.get(vm_name, {})
-    ansible_host = _ansible_value(vm_vars.get("ansible_host"))
-    key_file = _ansible_value(vm_vars.get("ansible_ssh_private_key_file"))
-    user = _ansible_value(vm_vars.get("ansible_user")) or "admin"
-    if not ansible_host or not key_file:
-        return subprocess.CompletedProcess(remote_command, 1, "", f"VM {vm_name} missing Ansible SSH connection vars")
-    remote_shell_command = f"sudo sh -lc {shlex.quote(shlex.join(remote_command))}"
-    return run(
-        [
-            str(repo_root / "scripts" / "decrypt-keys"),
-            f"inventory/vms/{vm_name}.sops.yaml",
-            "--",
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-i",
-            key_file,
-            f"{user}@{ansible_host}",
-            remote_shell_command,
-        ]
-    )
-
-
-def _ansible_value(value):
-    if isinstance(value, dict) and set(value) == {"__ansible_unsafe"}:
-        return value["__ansible_unsafe"]
-    return value
+    return LIFECYCLE.verify_check(repo_root, hostvars, ssh_check(primary, ["rm", "-f", marker_file]))
 
 
 def failed_after_generation(repo_root, intent, phase, result, keep_on_fail, generated, provisioned, require_nas_cleanup=True):
@@ -846,89 +538,14 @@ def failed_after_generation(repo_root, intent, phase, result, keep_on_fail, gene
 
 
 def cleanup_resources(repo_root, intent, provisioned=None, require_nas_cleanup=True):
-    provisioned = set(provisioned or [])
     stderr = []
     delete_generated_service_artifacts(repo_root, stderr)
-    for vm in intent["vms"]:
-        if vm["name"] in provisioned:
-            result = run([str(repo_root / "scripts" / "vm-destroy"), vm["name"], "--delete-vm-yaml"])
-            if result.returncode != 0:
-                stderr.append(phase_detail(result))
-        else:
-            delete_generated_artifacts(repo_root, vm["name"], stderr)
-    reconcile = run_reconcile(repo_root, intent, destroy=True)
-    if reconcile.returncode != 0:
-        stderr.append(phase_detail(reconcile))
-    elif require_nas_cleanup:
-        assertion = assert_cleanup_removes_nas_resources(reconcile.stdout, intent)
-        if assertion:
-            stderr.append(phase_detail(assertion))
-    delete_generated_dataset_artifact(repo_root, intent, stderr)
+    cleanup = LIFECYCLE.cleanup_resources(repo_root, intent, provisioned, require_nas_cleanup=require_nas_cleanup)
+    if cleanup.returncode != 0:
+        stderr.append(phase_detail(cleanup))
     if stderr:
         return subprocess.CompletedProcess([], 1, "", "; ".join(stderr))
     return subprocess.CompletedProcess([], 0, "", "")
-
-
-def assert_cleanup_removes_nas_resources(stdout, intent):
-    try:
-        payload = json.loads(stdout or "{}")
-    except json.JSONDecodeError as error:
-        return subprocess.CompletedProcess([], 1, "", f"cleanup output was not JSON: {error}")
-    expected_dataset = intent["dataset"]["name"]
-    expected_share = f"fortress-nfs-{expected_dataset}-{intent['policy']['mount']['access'].replace('_', '-')}"
-    operations = (payload.get("api_operations") or []) + (payload.get("write_actions") or [])
-    deleted_dataset = any(
-        operation.get("method") == "delete_dataset"
-        and operation.get("dataset") == expected_dataset
-        for operation in operations
-    ) or any(
-        operation.get("action") == "delete_dataset"
-        and operation.get("dataset") == expected_dataset
-        for operation in operations
-    )
-    deleted_share = any(
-        operation.get("method") == "delete_nfs_share"
-        and operation.get("share") == expected_share
-        for operation in operations
-    ) or any(
-        operation.get("action") == "delete_nfs_share"
-        and operation.get("share") == expected_share
-        for operation in operations
-    )
-    errors = []
-    if not deleted_dataset:
-        errors.append(f"expected cleanup to delete Ephemeral Dataset {expected_dataset}")
-    if not deleted_share:
-        errors.append(f"expected cleanup to delete Derived NFS Share {expected_share}")
-    postcondition_findings = payload.get("destroy_postcondition_findings")
-    if postcondition_findings is None:
-        errors.append("cleanup did not verify NAS destroy postconditions")
-    else:
-        errors.extend(finding.get("message") for finding in postcondition_findings if finding.get("message"))
-    if errors:
-        return subprocess.CompletedProcess([], 1, "", "; ".join(errors))
-    return None
-
-
-def delete_generated_artifacts(repo_root, vm_name, stderr):
-    for suffix in (".sops.yaml", ".yaml"):
-        path = repo_root / "inventory" / "vms" / f"{vm_name}{suffix}"
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError as error:
-            stderr.append(f"failed to delete generated artifact {path}: {error}")
-
-
-def delete_generated_dataset_artifact(repo_root, intent, stderr):
-    path = dataset_artifact_path(repo_root, intent)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        stderr.append(f"failed to delete generated artifact {path}: {error}")
 
 
 def delete_generated_service_artifacts(repo_root, stderr):
@@ -955,28 +572,6 @@ def delete_generated_service_artifacts(repo_root, stderr):
             continue
         except OSError as error:
             stderr.append(f"failed to delete generated artifact {generated_dir}: {error}")
-
-
-def run(command, input_text=None, env=None):
-    try:
-        return subprocess.run(
-            command,
-            input=input_text,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except OSError as error:
-        return subprocess.CompletedProcess(command, 1, "", str(error))
-
-
-def phase_detail(result):
-    return "\n".join(
-        stream.strip()
-        for stream in (result.stdout, result.stderr)
-        if stream and stream.strip()
-    )
 
 
 if __name__ == "__main__":

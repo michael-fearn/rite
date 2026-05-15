@@ -34,6 +34,7 @@ class AcceptanceTestLifecycle:
         if endpoint_name not in inventory.nas_endpoints:
             print(f"NAS Endpoint {endpoint_name!r} is not declared at {repo_root / 'inventory' / 'nas' / f'{endpoint_name}.yaml'}", file=sys.stderr)
             return 1
+        endpoint = inventory.nas_endpoints[endpoint_name]
         policy = inventory.acceptance_policies.get(self.policy_name)
         if not policy:
             print(f"Acceptance Policy {self.policy_name!r} is not declared at {repo_root / 'inventory' / 'acceptance' / f'{self.policy_name}.yaml'}", file=sys.stderr)
@@ -67,6 +68,7 @@ class AcceptanceTestLifecycle:
             "host": host_name,
             "template": template_name,
             "endpoint": endpoint_name,
+            "endpoint_config": endpoint,
             "policy": policy,
             "dataset": dataset,
             "vms": vms,
@@ -229,8 +231,10 @@ class AcceptanceTestLifecycle:
             )
         return None
 
-    def provision_vms(self, repo_root, intent, auto_confirm, provisioned):
+    def provision_vms(self, repo_root, intent, auto_confirm, provisioned, progress=None):
         for vm in intent["vms"]:
+            if progress:
+                progress(vm)
             command = [str(repo_root / "scripts" / "vm-up"), vm["name"]]
             provisioned.append(vm["name"])
             if auto_confirm:
@@ -258,6 +262,22 @@ class AcceptanceTestLifecycle:
             if result.returncode != 0:
                 return result
         return subprocess.CompletedProcess([], 0, "", "")
+
+    def verify_named_checks(self, repo_root, checks, progress=None):
+        hostvars = load_hostvars(repo_root)
+        for check in checks:
+            if progress:
+                progress(check["description"])
+            result = self.verify_check(repo_root, hostvars, check)
+            if result.returncode != 0:
+                return result
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    def load_verification_hostvars(self, repo_root):
+        return load_hostvars(repo_root)
+
+    def verify_check(self, repo_root, hostvars, check):
+        return verify_ssh_check(repo_root, check["vm"]["name"], hostvars, check["command"], check.get("expected_stdout"))
 
     def failed_after_generation(self, repo_root, intent, phase, result, keep_on_fail, generated, provisioned, require_nas_cleanup=True):
         message = f"{phase} failed: {phase_detail(result)}"
@@ -446,11 +466,12 @@ def _ansible_value(value):
     return value
 
 
-def run(command, input_text=None):
+def run(command, input_text=None, env=None):
     try:
         return subprocess.run(
             command,
             input=input_text,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

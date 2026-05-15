@@ -35,6 +35,59 @@ class AcceptanceLifecycleTests(unittest.TestCase):
             self.assertIn("dataset: acceptance-nfs-demo", primary_yaml)
             self.assertIn("mount_point: /mnt/nfs-demo", primary_yaml)
 
+    def test_service_layer_lifecycle_resolves_endpoint_config_and_common_artifacts(self):
+        from fortress_acceptance.lifecycle import AcceptanceTestLifecycle
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            (root / "inventory" / "acceptance" / "service-layer.yaml").write_text(
+                "dataset: acceptance-service-layer\n"
+                "mount:\n"
+                "  name: service-layer\n"
+                "  mount_point: /mnt/service-layer\n"
+                "  access: read_write\n"
+                "hardware:\n"
+                "  cores: 1\n"
+                "  memory: 1024\n"
+                "  disk_size: 8G\n"
+                "storage_by_host:\n"
+                "  wintermute: fast\n"
+                "vms:\n"
+                "  primary:\n"
+                "    name: tmp-service-primary\n"
+                "    vmid: 8921\n"
+                "    address_by_host:\n"
+                "      wintermute: 10.10.0.233/24\n"
+                "  peer:\n"
+                "    name: tmp-service-peer\n"
+                "    vmid: 8922\n"
+                "    address_by_host:\n"
+                "      wintermute: 10.10.0.234/24\n"
+            )
+            lifecycle = AcceptanceTestLifecycle(
+                policy_name="service-layer",
+                artifact_label="Service-layer Acceptance",
+                purpose="service-layer-acceptance",
+            )
+            intent = lifecycle.resolve_intent(
+                root,
+                load_inventory_tree(root),
+                {"host": "wintermute", "template": "debian-13-base", "endpoint": "truenas"},
+            )
+
+            self.assertEqual("10.10.0.15", intent["endpoint_config"]["management_address"])
+            self.assertEqual("acceptance-service-layer", intent["dataset"]["name"])
+            self.assertEqual(["tmp-service-primary", "tmp-service-peer"], [vm["name"] for vm in intent["vms"]])
+
+            lifecycle.write_generated_dataset(root, intent)
+            lifecycle.write_generated_vms(root, intent)
+
+            dataset_yaml = (root / "inventory" / "datasets" / "acceptance-service-layer.yaml").read_text()
+            primary_yaml = (root / "inventory" / "vms" / "tmp-service-primary.yaml").read_text()
+            self.assertIn("name: acceptance-service-layer", dataset_yaml)
+            self.assertIn("purpose: service-layer-acceptance", primary_yaml)
+            self.assertIn("dataset: acceptance-service-layer", primary_yaml)
+
     def _fixture(self, tmp):
         root = Path(tmp)
         inventory = root / "inventory"
