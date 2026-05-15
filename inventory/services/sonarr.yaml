@@ -1,0 +1,37 @@
+name: sonarr
+hostname: sonarr.fearn.cloud
+service_group: media
+service_data_owner:
+  uid: 1001
+  gid: 1001
+backend:
+  vm: media-vm
+  port: 8989
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: sonarr
+      image: lscr.io/linuxserver/sonarr:4.0.17.2952-ls311
+      published_ports:
+        - bind: 0.0.0.0
+          host: 8989
+          container: 8989
+          ingress: true
+      env:
+        PUID: 1001
+        PGID: 1001
+        TZ: UTC
+      volumes:
+        - service_path: config
+          container: /config
+          access: read_write
+        - mount: media
+          source: /
+          container: /data
+          access: read_write

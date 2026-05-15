@@ -1,0 +1,29 @@
+name: seerr
+hostname: seerr.fearn.cloud
+service_group: media
+service_data_owner:
+  uid: 1001
+  gid: 1001
+backend:
+  vm: media-vm
+  port: 5055
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: seerr
+      image: ghcr.io/seerr-team/seerr:v3.2.0
+      published_ports:
+        - bind: 0.0.0.0
+          host: 5055
+          container: 5055
+          ingress: true
+      volumes:
+        - service_path: config
+          container: /app/config
+          access: read_write

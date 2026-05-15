@@ -59,11 +59,11 @@ A named set of one or more Services on the same VM that intentionally share a VM
 _Avoid_: stack (too Compose-specific), app suite.
 
 **Media VM**:
-The Apps VLAN VM that runs media playback, request, catalog, and indexer Services such as Jellyfin, Overseerr, Sonarr, Radarr, Lidarr, Prowlarr, and Bazarr.
+The Apps VLAN VM that runs media playback, request, catalog, and indexer Services such as Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, and Bazarr.
 _Avoid_: media automation VM, Jellyfin VM.
 
 **Download VM**:
-The Apps VLAN VM that runs downloader Services such as qBittorrent, SABnzbd, NZBGet, and VPN-bound download components.
+The Apps VLAN VM that runs downloader Services such as qBittorrent and SABnzbd.
 _Avoid_: downloader container, media automation VM.
 
 **Immich VM**:
@@ -101,6 +101,18 @@ _Avoid_: host path (too broad), local volume path.
 **Share-backed Volume**:
 A Service container bind mount whose source references a VM Mount's Share and whose target is a container path.
 _Avoid_: NFS volume (the Service references the VM-side Mount, not NFS topology directly).
+
+**Container Media Root**:
+The shared container-side root path used by media and downloader Services to see the same media Dataset layout for hardlinks and atomic moves.
+_Avoid_: downloads mount, TV mount, movies mount, per-Service media root.
+
+**Application Configuration Artifact**:
+A Service-specific configuration file or directory that fortress installs without modeling the application's internal settings as first-party fortress concepts.
+_Avoid_: fortress app schema, first-party app config.
+
+**Application Configuration Template**:
+A repository-local template for an Application Configuration Artifact rendered during Service Deploy with fortress-owned facts.
+_Avoid_: app schema, generated service model.
 
 **Entity**:
 A Host, VM, Service, or Dataset. The thing each `<entity>.yaml` (and optional `<entity>.sops.yaml`) describes.
@@ -453,15 +465,19 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - Download clients must run on a separate **VM** from media request and playback Services.
 - The **Media VM** and **Download VM** both consume the media Dataset, while individual **Services** narrow their visible paths through **Share-backed Volumes**.
 - The **Media VM** and **Download VM** mount the media Dataset read-write at the **VM** level, while individual **Services** use **Share-backed Volume** subpaths to narrow read/write exposure.
+- Sonarr and Radarr require read-write access to the full **Container Media Root** so completed downloads and final media libraries remain under one visible filesystem root.
 - Jellyfin uses read-only media library **Share-backed Volumes**.
-- Overseerr does not consume the media Dataset unless a later explicit requirement appears.
+- Bazarr uses read-write media library **Share-backed Volumes** so subtitles can be written beside media files.
+- Seerr does not consume the media Dataset unless a later explicit requirement appears.
 - The **Immich VM** keeps Immich database and cache state VM-local and consumes the Immich Dataset for library storage.
 - The **File Browser VM** is a standalone **VM** and is the only Apps VLAN **VM** that consumes the personal media Dataset.
 - The **Vaultwarden VM** is a standalone **VM** and does not use NAS-backed live storage by default.
 - The **Vaultwarden VM** is `vaultwarden-vm` at `10.50.0.11/24` on the `neuromancer` Host.
 - The **Immich VM** is `immich-vm` at `10.50.0.12/24` on the `neuromancer` Host.
 - The **Media VM** is `media-vm` at `10.50.0.13/24` on the `neuromancer` Host.
+- The **Media VM** uses VMID `1103`, 4 cores, 8192 MiB memory, and a 32G local disk.
 - The **Download VM** is `download-vm` at `10.50.0.14/24` on the `neuromancer` Host.
+- The **Download VM** uses VMID `1104`, 2 cores, 4096 MiB memory, and a 32G local disk.
 - The **File Browser VM** is `file-browser-vm` at `10.50.0.15/24` on the `neuromancer` Host.
 - VMIDs `100`-`8899` are for ordinary **VMs**, `8900`-`8999` are for **Operational VMs**, and `9000`-`9999` are for **Templates**.
 - VM names beginning with `tmp-` are reserved for generated temporary **VMs** and must not be checked in as ordinary Inventory.
@@ -655,6 +671,8 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Share-backed Volume** may narrow its **Mount**'s access mode, but must not widen it.
 - A **Share-backed Volume** binds the root of a **Mount** only when `source: /` is explicit; otherwise its source is a safe relative subpath.
 - A **Share-backed Volume** subpath under an **Adopted Dataset** must already exist unless an explicit creation workflow is modeled later.
+- **Application Configuration Artifacts** may consume fortress-generated paths, ports, secrets, and hostnames, but their application-specific settings remain outside the first-party fortress schema.
+- An **Application Configuration Template** must render only into its owning **Service Data Directory** unless a later explicit exception is modeled.
 - A declared **Mount** must be active and accessible during **Configure** before later VM configuration or Service deployment may rely on it.
 - Service deployment validates the **Share-backed Volume** subpaths used by that **Service** before starting containers.
 - A **Mount** with a declared ownership mapping must prove read/write/delete access as the mapped UID/GID during **Configure**.
@@ -681,3 +699,18 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Multi-interface NAS clients**: Deferred. Mount-bearing VMs currently require an unambiguous static IP address for NFS Share client access.
 - **Dataset ACLs and modes**: Deferred. Dataset declarations model root owner UID/GID only; root-level Acceptance Test writes do not settle mapped UID/GID or ACL semantics.
 - **Multi-interface NAS clients**: Deferred. Mount-bearing VMs currently require a static IP address; selecting among multiple VM client addresses will be modeled when multi-interface VMs need NAS access.
+- **Arr stack configuration ownership**: Resolved. Fortress owns VM placement, Service boundaries, Mounts, Share-backed Volumes, Published Ports, secrets wiring, and install/deploy ceremony; Sonarr/Radarr/Prowlarr/Bazarr/Jellyfin/Seerr/downloader settings are **Application Configuration Artifacts**, not first-party fortress schema.
+- **Quadlet application configuration deployment**: Resolved. Quadlet **Services** may declare **Application Configuration Templates** rendered by **Service Deploy** into their own **Service Data Directory**; app-specific settings remain native config content, not fortress schema fields.
+- **Arr stack Service boundaries**: Resolved. Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, and Bazarr are separate **Services** in the `media` **Service Group** on the **Media VM**; qBittorrent and SABnzbd are separate **Services** on the **Download VM**. Lidarr and NZBGet are deferred until explicitly needed.
+- **Downloader VPN policy**: Resolved. Fortress does not model VPN-bound downloader components; downloader egress policy is handled at the router level.
+- **Downloader Service set**: Resolved. qBittorrent and SABnzbd are both active first-pass downloader **Services**.
+- **Arr stack storage layout**: Resolved. Sonarr and Radarr receive the full `/data` **Container Media Root** read-write; qBittorrent receives `/data/torrents` read-write; SABnzbd receives `/data/usenet` read-write; Bazarr receives `/data/media` read-write; Jellyfin receives `/data/media` read-only; Seerr receives no media Dataset mount by default.
+- **Arr stack media subpaths**: Resolved. Fortress expects the TRaSH-aligned media, torrent, and Usenet subpaths under the adopted media Dataset to already exist; fortress does not model a creation workflow for those paths.
+- **Arr stack ingress**: Resolved. Arr stack browser UIs use LAN-only internal **Ingress** hostnames through the **Ingress** **VM**; direct Backend access is reserved for Trusted-only recovery or administration paths.
+- **Seerr hostname**: Resolved. The Seerr **Service** uses `seerr.fearn.cloud`; friendly request aliases are deferred until hostname aliases are explicitly modeled.
+- **Arr stack image pinning**: Resolved. Checked-in arr stack **Service** Inventory uses exact image version tags, not `latest`, `develop`, `nightly`, or rolling channel tags.
+- **Arr stack image publishers**: Resolved. Arr stack **Services** prefer official images where they are the strongest current distribution path, and LinuxServer images where uniform operations matter for arr and downloader Services.
+- **Jellyfin GPU acceleration**: Deferred. First-pass Jellyfin runs CPU-only; GPU acceleration requires an explicit VM device and container device model before it is represented in fortress Inventory.
+- **Arr stack hostnames and ports**: Resolved. First-pass Services use `jellyfin.fearn.cloud:8096`, `seerr.fearn.cloud:5055`, `sonarr.fearn.cloud:8989`, `radarr.fearn.cloud:7878`, `prowlarr.fearn.cloud:9696`, `bazarr.fearn.cloud:6767`, `qbittorrent.fearn.cloud:8080`, and `sabnzbd.fearn.cloud:8081` with SABnzbd container port `8080`.
+- **Arr stack runtime owner**: Resolved. First-pass arr and downloader **Services** use UID/GID `1001:1001`, matching the adopted media Dataset owner.
+- **Arr stack first-run credentials**: Resolved. First-pass arr stack Inventory does not pre-model app credentials or generated API keys as **Service Secrets**; app-native first-run setup owns them until explicit automated configuration is added.

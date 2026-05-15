@@ -1,0 +1,7 @@
+name: media
+nas: truenas
+path: /mnt/tank/media
+lifecycle: adopted
+owner:
+  uid: 1001
+  gid: 1001

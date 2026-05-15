@@ -1,0 +1,37 @@
+name: sabnzbd
+hostname: sabnzbd.fearn.cloud
+service_group: download
+service_data_owner:
+  uid: 1001
+  gid: 1001
+backend:
+  vm: download-vm
+  port: 8081
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: sabnzbd
+      image: lscr.io/linuxserver/sabnzbd:5.0.3-ls254
+      published_ports:
+        - bind: 0.0.0.0
+          host: 8081
+          container: 8080
+          ingress: true
+      env:
+        PUID: 1001
+        PGID: 1001
+        TZ: UTC
+      volumes:
+        - service_path: config
+          container: /config
+          access: read_write
+        - mount: media
+          source: usenet
+          container: /data/usenet
+          access: read_write

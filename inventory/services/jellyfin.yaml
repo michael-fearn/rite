@@ -1,0 +1,36 @@
+name: jellyfin
+hostname: jellyfin.fearn.cloud
+service_group: media
+service_data_owner:
+  uid: 1001
+  gid: 1001
+backend:
+  vm: media-vm
+  port: 8096
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: jellyfin
+      image: docker.io/jellyfin/jellyfin:10.11.8
+      published_ports:
+        - bind: 0.0.0.0
+          host: 8096
+          container: 8096
+          ingress: true
+      volumes:
+        - service_path: config
+          container: /config
+          access: read_write
+        - service_path: cache
+          container: /cache
+          access: read_write
+        - mount: media
+          source: media
+          container: /data/media
+          access: read_only

@@ -1,0 +1,37 @@
+name: radarr
+hostname: radarr.fearn.cloud
+service_group: media
+service_data_owner:
+  uid: 1001
+  gid: 1001
+backend:
+  vm: media-vm
+  port: 7878
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: radarr
+      image: lscr.io/linuxserver/radarr:6.1.1.10360-ls302
+      published_ports:
+        - bind: 0.0.0.0
+          host: 7878
+          container: 7878
+          ingress: true
+      env:
+        PUID: 1001
+        PGID: 1001
+        TZ: UTC
+      volumes:
+        - service_path: config
+          container: /config
+          access: read_write
+        - mount: media
+          source: /
+          container: /data
+          access: read_write

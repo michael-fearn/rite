@@ -1,0 +1,38 @@
+name: qbittorrent
+hostname: qbittorrent.fearn.cloud
+service_group: download
+service_data_owner:
+  uid: 1001
+  gid: 1001
+backend:
+  vm: download-vm
+  port: 8080
+ingress:
+  enabled: true
+  exposure: lan_only
+  tls: letsencrypt_dns
+  auth:
+    type: none
+deploy:
+  type: quadlet
+  containers:
+    - name: qbittorrent
+      image: lscr.io/linuxserver/qbittorrent:5.2.0_v2.0.12-ls457
+      published_ports:
+        - bind: 0.0.0.0
+          host: 8080
+          container: 8080
+          ingress: true
+      env:
+        PUID: 1001
+        PGID: 1001
+        TZ: UTC
+        WEBUI_PORT: 8080
+      volumes:
+        - service_path: config
+          container: /config
+          access: read_write
+        - mount: media
+          source: torrents
+          container: /data/torrents
+          access: read_write

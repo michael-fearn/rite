@@ -57,11 +57,11 @@ Forgejo runners must not run on `forgejo-vm`. Add a separate runner VM when runn
 | --- | --- | --- | --- | --- |
 | `vaultwarden-vm` | `10.50.0.11` | `neuromancer` | Vaultwarden | VM-local primary data, PBS-backed |
 | `immich-vm` | `10.50.0.12` | `neuromancer` | Immich application containers, Postgres, Redis | NFS `tank/immich` for library storage; database/cache VM-local |
-| `media-vm` | `10.50.0.13` | `neuromancer` | Jellyfin, Overseerr, Sonarr, Radarr, Lidarr, Prowlarr, Bazarr | NFS `tank/media` |
-| `download-vm` | `10.50.0.14` | `neuromancer` | qBittorrent, SABnzbd, NZBGet, VPN-bound download components | NFS `tank/media` |
+| `media-vm` | `10.50.0.13` | `neuromancer` | Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, Bazarr | NFS `tank/media` |
+| `download-vm` | `10.50.0.14` | `neuromancer` | qBittorrent, SABnzbd | NFS `tank/media` |
 | `file-browser-vm` | `10.50.0.15` | `neuromancer` | File Browser | NFS `tank/personal-media` |
 
-`media-vm` and `download-vm` both mount `tank/media` read-write at the VM level. Individual Services narrow visible paths and read/write exposure through Share-backed Volume subpaths. Jellyfin uses read-only library subpaths. Overseerr does not consume the media Dataset unless a later explicit requirement appears.
+`media-vm` and `download-vm` both mount `tank/media` read-write at the VM level. Individual Services narrow visible paths and read/write exposure through Share-backed Volume subpaths. Jellyfin uses read-only library subpaths. Seerr does not consume the media Dataset unless a later explicit requirement appears.
 
 User-facing HTTP Services on `media-vm` and `download-vm` are exposed through `internal-ingress-vm` for DNS and TLS. Direct backend access is reserved for explicit Trusted-only emergency or administration paths.
 
