@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from fortress_inventory.entity_graph import InventoryEntityGraph, InventoryEntityGraphError
 from fortress_inventory.model import load_inventory_tree
 
 
@@ -27,26 +28,18 @@ def main():
         )
         return 1
 
-    backend_vm_name = service.get("backend", {}).get("vm")
-    if not backend_vm_name:
-        print(f"Service {service_name!r} has no backend.vm", file=sys.stderr)
-        return 1
-    if backend_vm_name not in model.vms:
-        print(
-            f"Backend VM {backend_vm_name!r} for Service {service_name!r} is not declared at "
-            f"{repo_root / 'inventory' / 'vms' / f'{backend_vm_name}.yaml'}",
-            file=sys.stderr,
-        )
+    intent = resolve_intent(repo_root, model, service_name, service)
+    if intent is None:
         return 1
 
-    vm_up = [str(repo_root / "scripts" / "vm-up"), backend_vm_name]
+    vm_up = [str(repo_root / "scripts" / "vm-up"), intent.backend_vm_name]
     if auto_confirm:
         vm_up.append("--auto-confirm")
     phases = [
         ("VM Lifecycle Convergence", vm_up),
         ("Service Deploy", [str(repo_root / "scripts" / "service-deploy"), service_name]),
     ]
-    if service.get("ingress", {}).get("enabled") is True:
+    if intent.requires_ingress_regeneration:
         phases.append(("Ingress Regeneration", [str(repo_root / "scripts" / "ingress-regenerate")]))
 
     for phase, command in phases:
@@ -68,6 +61,30 @@ def parse_args(args):
         auto_confirm = True
 
     return service_name, auto_confirm
+
+
+def resolve_intent(repo_root, model, service_name, service):
+    graph = InventoryEntityGraph(model)
+    try:
+        return graph.service_launch_intent(service_name)
+    except InventoryEntityGraphError as error:
+        backend = service.get("backend") or {}
+        if not isinstance(backend, dict):
+            print(error, file=sys.stderr)
+            return None
+        backend_vm_name = backend.get("vm")
+        if not backend_vm_name:
+            print(f"Service {service_name!r} has no backend.vm", file=sys.stderr)
+            return None
+        if backend_vm_name not in model.vms:
+            print(
+                f"Backend VM {backend_vm_name!r} for Service {service_name!r} is not declared at "
+                f"{repo_root / 'inventory' / 'vms' / f'{backend_vm_name}.yaml'}",
+                file=sys.stderr,
+            )
+            return None
+        print(error, file=sys.stderr)
+        return None
 
 
 def run_phase(phase, command, service_name):

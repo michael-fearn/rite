@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from fortress_inventory.entity_graph import InventoryEntityGraph
+
 
 @dataclass(frozen=True)
 class NasReality:
@@ -404,42 +406,30 @@ def _mount_preflight_findings(inventory, previous_mounts):
 
 
 def derive_desired_nfs_shares(inventory, include_ephemeral_datasets=False):
-    datasets_by_name = {
-        dataset.get("name"): dataset
+    desired = []
+    graph = InventoryEntityGraph(inventory)
+    dataset_names = {
+        dataset.get("name")
         for dataset in inventory.datasets.values()
         if dataset.get("name")
         and (include_ephemeral_datasets or dataset.get("lifecycle", "adopted") == "adopted")
     }
-    grouped = {}
-    for vm in inventory.vms.values():
-        clients = _vm_static_addresses(vm)
-        for mount in vm.get("mounts", []) or []:
-            if mount.get("protocol") != "nfs":
-                continue
-            dataset_name = mount.get("dataset")
-            dataset = datasets_by_name.get(dataset_name)
-            if not dataset:
-                continue
-            key = (
-                dataset_name,
-                dataset.get("path"),
-                mount.get("protocol"),
-                mount.get("access"),
-                dataset.get("lifecycle"),
-            )
-            grouped.setdefault(key, set()).update(clients)
-
-    desired = []
-    for (dataset_name, path, protocol, access, lifecycle), clients in sorted(grouped.items()):
+    for share_input in graph.desired_nfs_share_inputs(
+        include_ephemeral_datasets=include_ephemeral_datasets,
+        dataset_names=dataset_names,
+    ):
         share = {
-            "name": f"fortress-{protocol}-{dataset_name}-{access.replace('_', '-')}",
-            "dataset": dataset_name,
-            "path": path,
-            "protocol": protocol,
-            "access": access,
-            "clients": sorted(clients),
+            "name": (
+                f"fortress-{share_input.protocol}-{share_input.dataset_name}-"
+                f"{share_input.access.replace('_', '-')}"
+            ),
+            "dataset": share_input.dataset_name,
+            "path": share_input.path,
+            "protocol": share_input.protocol,
+            "access": share_input.access,
+            "clients": list(share_input.client_addresses),
         }
-        if lifecycle == "ephemeral":
+        if share_input.lifecycle == "ephemeral":
             share["maproot_user"] = "root"
             share["maproot_group"] = "root"
         desired.append(share)
@@ -571,15 +561,6 @@ def _paths_overlap(existing_path, desired_path):
     if not existing_path or not desired_path:
         return False
     return existing_path == desired_path or existing_path.startswith(f"{desired_path}/")
-
-
-def _vm_static_addresses(vm):
-    addresses = []
-    for interface in vm.get("network", {}).get("interfaces", []) or []:
-        address = interface.get("address")
-        if address:
-            addresses.append(address.split("/", 1)[0])
-    return addresses
 
 
 def _redacted_connection(inventory):
