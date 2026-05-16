@@ -82,6 +82,10 @@ _Avoid_: password manager container, shared secrets VM.
 The VM (and TCP port) that the Ingress reverse-proxies a Service to. Declared as `backend.vm` and `backend.port`. Becomes a list when the Service is HA.
 _Avoid_: upstream (overloaded with apt/git senses).
 
+**Service Runtime Intent**:
+The resolved fortress-owned runtime meaning of one or more Services, projected from Inventory for Service Deploy and validation. Includes Backend placement, Published Ports, Service Data Directories, Service Secrets, Service Group runtime wiring, container start order, and Share-backed Volumes without requiring callers to traverse raw Service yaml.
+_Avoid_: raw service config, deploy vars, rendered Quadlet.
+
 **Published Port**:
 A VM-local port exposed by a Quadlet container for another VM or the Ingress to reach; defaults to loopback binding and TCP unless declared otherwise.
 _Avoid_: exposed port (overloaded between container metadata and host publishing).
