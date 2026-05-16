@@ -196,6 +196,14 @@ _Avoid_: setup.
 An idempotent operator workflow that converges a Host or VM to its declared state, usually by wrapping an Ansible run. Re-runnable.
 _Avoid_: provision (reserve for tofu).
 
+**Operator Workflow Plan**:
+An inspectable ordered declaration of phases, confirmation gates, and diagnostic labels for one operator workflow invocation.
+_Avoid_: script loop, subprocess helper.
+
+**Operator Workflow Runner**:
+The module that executes an Operator Workflow Plan, including phase ordering, confirmation gates, subprocess execution, stop-on-failure, and rich diagnostic output.
+_Avoid_: command runner, script helper.
+
 **Host Readiness**:
 The resumable Host-level operator workflow that proves a Host has completed all prerequisite ceremonies needed before ordinary VM and Service workflows depend on it.
 _Avoid_: Host Prepare, host setup, first class wrapper.
@@ -496,6 +504,9 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Template Verification VM** is provisioned from exactly one **Template** on exactly one **Host** and destroyed after verification.
 - A **Template Verification VM** is an **Operational VM**.
 - A **Template Verification Policy** defines the reusable slot from which each **Template Verification VM** is generated.
+- An **Operator Workflow Plan** describes the phases, confirmation gates, and diagnostic labels for exactly one operator workflow invocation.
+- The **Operator Workflow Runner** executes an **Operator Workflow Plan** without owning the domain-specific ceremony rules that decide which phases belong in the plan.
+- The **Operator Workflow Runner** owns confirmation gate handling and rich diagnostic output because those are part of the operator-facing workflow contract.
 - **Host Readiness** treats an already-completed **Bootstrap** as a satisfied prerequisite while preserving **Bootstrap** itself as a one-shot workflow.
 - **Host Readiness** requires an already-bootstrapped **Host** to prove SSH reachability with its stored per-Host credential before continuing.
 - **Host Readiness** runs the full **Configure** scope for the selected **Host**.
