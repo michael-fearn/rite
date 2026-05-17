@@ -124,6 +124,101 @@ def validate_vm_mounts(model):
     return errors
 
 
+def validate_vm_launchable_service_groups(model):
+    errors = []
+    declaring_vms_by_group = {}
+    for vm_name, vm in model.vms.items():
+        for group_index, group in enumerate(vm.get("launchable_service_groups", []) or []):
+            group_name = group.get("name")
+            existing_vm_name = declaring_vms_by_group.setdefault(group_name, vm_name)
+            if existing_vm_name != vm_name:
+                errors.append(
+                    ValidationError(
+                        "duplicate_launchable_service_group",
+                        f"inventory/vms/{vm_name}.yaml.launchable_service_groups[{group_index}].name",
+                        f"Service Group {group_name} is declared launchable by both {existing_vm_name} and {vm_name}",
+                    )
+                )
+            ordered_service_names = group.get("launch_order", []) or []
+            seen_service_names = {}
+            for service_index, service_name in enumerate(ordered_service_names):
+                if service_name in seen_service_names:
+                    errors.append(
+                        ValidationError(
+                            "duplicate_launch_order_service",
+                            (
+                                f"inventory/vms/{vm_name}.yaml."
+                                f"launchable_service_groups[{group_index}].launch_order[{service_index}]"
+                            ),
+                            f"VM {vm_name} Launch Order declares duplicate Service {service_name}",
+                        )
+                    )
+                else:
+                    seen_service_names[service_name] = service_index
+
+            for service_index, service_name in enumerate(group.get("launch_order", []) or []):
+                if service_name not in model.services:
+                    errors.append(
+                        ValidationError(
+                            "missing_launch_order_service",
+                            (
+                                f"inventory/vms/{vm_name}.yaml."
+                                f"launchable_service_groups[{group_index}].launch_order[{service_index}]"
+                            ),
+                            f"VM {vm_name} Launch Order references missing Service {service_name}",
+                        )
+                    )
+                    continue
+                service = model.services[service_name]
+                if service.get("service_group") != group_name:
+                    errors.append(
+                        ValidationError(
+                            "launch_order_service_group_mismatch",
+                            (
+                                f"inventory/vms/{vm_name}.yaml."
+                                f"launchable_service_groups[{group_index}].launch_order[{service_index}]"
+                            ),
+                            f"VM {vm_name} Launch Order includes Service {service_name}, "
+                            f"which does not declare Service Group {group_name}",
+                        )
+                    )
+                backend_vm_name = _service_backend_vm_name(service)
+                if backend_vm_name != vm_name:
+                    errors.append(
+                        ValidationError(
+                            "launch_order_service_backend_vm_mismatch",
+                            (
+                                f"inventory/vms/{vm_name}.yaml."
+                                f"launchable_service_groups[{group_index}].launch_order[{service_index}]"
+                            ),
+                            f"VM {vm_name} Launch Order includes Service {service_name}, "
+                            f"which uses Backend VM {backend_vm_name}",
+                        )
+                    )
+            expected_service_names = {
+                service_name
+                for service_name, service in model.services.items()
+                if service.get("service_group") == group_name and _service_backend_vm_name(service) == vm_name
+            }
+            missing_service_names = sorted(expected_service_names - set(ordered_service_names))
+            for service_name in missing_service_names:
+                errors.append(
+                    ValidationError(
+                        "missing_launch_order_service_group_member",
+                        f"inventory/vms/{vm_name}.yaml.launchable_service_groups[{group_index}].launch_order",
+                        f"VM {vm_name} Launch Order for Service Group {group_name} omits Service {service_name}",
+                    )
+                )
+    return errors
+
+
+def _service_backend_vm_name(service):
+    backend = service.get("backend", {})
+    if not isinstance(backend, dict):
+        return None
+    return backend.get("vm")
+
+
 def _mount_access_contradicting_option(mount):
     access = mount.get("access")
     options = {str(option).split("=", 1)[0] for option in mount.get("options_extra", []) or []}

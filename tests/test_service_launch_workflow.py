@@ -188,6 +188,36 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
             self.assertIn("service-deploy immich", calls)
             self.assertNotIn("service-deploy photos", calls)
 
+    def test_service_launch_rejects_launchable_group_targets_without_running_group_workflow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._workflow_fixture(tmp)
+            (root / "inventory" / "vms" / "media01.yaml").write_text(
+                "vmid: 101\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "launchable_service_groups:\n"
+                "  - name: media\n"
+                "    launch_order:\n"
+                "      - immich\n"
+                "      - photos\n"
+            )
+            self._write_service(root, "immich", "media01", ingress_enabled=True, service_group="media")
+            self._write_service(root, "photos", "media01", ingress_enabled=True, service_group="media")
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-launch"), "media"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Service 'media' is not declared", result.stderr)
+            self.assertFalse(calls_log.exists())
+
     def test_service_launch_stops_and_reports_the_failed_phase(self):
         scenarios = {
             "vm-up": (
@@ -260,10 +290,12 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
             script.chmod(script.stat().st_mode | stat.S_IXUSR)
         return root, calls_log
 
-    def _write_service(self, root, service_name, backend_vm, ingress_enabled):
+    def _write_service(self, root, service_name, backend_vm, ingress_enabled, service_group=None):
         ingress = "true" if ingress_enabled else "false"
+        group = f"service_group: {service_group}\n" if service_group else ""
         (root / "inventory" / "services" / f"{service_name}.yaml").write_text(
             f"name: {service_name}\n"
+            f"{group}"
             "backend:\n"
             f"  vm: {backend_vm}\n"
             "  port: 2283\n"

@@ -1,6 +1,7 @@
 name: observability
 hostname: grafana.fearn.cloud
 service_group: observability
+service_network: observability
 service_data_owner:
   uid: 1000
   gid: 1000

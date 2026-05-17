@@ -76,7 +76,7 @@ def validate_quadlet_services(model):
     errors = []
     errors.extend(_validate_published_ports(model))
     errors.extend(_validate_service_images(model))
-    errors.extend(_validate_service_groups(model))
+    errors.extend(_validate_service_networks(model))
     errors.extend(_validate_container_dependencies(model))
     errors.extend(_validate_service_secrets(model))
     return errors
@@ -157,29 +157,33 @@ def _image_is_pinned(image):
     return not remainder.endswith(":latest")
 
 
-def _validate_service_groups(model):
+def _validate_service_networks(model):
     errors = []
-    group_backend_vms = {}
+    network_backend_vms = {}
     aliases_by_network = {}
     for service_name, service in model.services.items():
         if service.get("deploy", {}).get("type") != "quadlet":
             continue
         group_name = service.get("service_group")
+        network_name = service.get("service_network")
         backend = service.get("backend", {})
         backend_vm_name = backend.get("vm") if isinstance(backend, dict) else None
-        if group_name:
-            existing_vm = group_backend_vms.setdefault(group_name, backend_vm_name)
+        if network_name:
+            existing_vm = network_backend_vms.setdefault(network_name, backend_vm_name)
             if existing_vm != backend_vm_name:
                 errors.append(
                     ValidationError(
-                        "service_group_spans_backend_vms",
-                        f"inventory/services/{service_name}.yaml.service_group",
-                        f"Service Group {group_name} spans Backend VMs {existing_vm} and {backend_vm_name}",
+                        "service_network_spans_backend_vms",
+                        f"inventory/services/{service_name}.yaml.service_network",
+                        f"Service Network {network_name} spans Backend VMs {existing_vm} and {backend_vm_name}",
                     )
                 )
-            network_key = ("service_group", group_name)
+        if network_name:
+            network_key = ("service_network", network_name)
+            network_description = f"Service Network {network_name}"
         else:
             network_key = ("service", service_name)
+            network_description = f"Service {service_name}"
         aliases = aliases_by_network.setdefault(network_key, {})
         for container_index, container in enumerate(service.get("deploy", {}).get("containers", []) or []):
             alias = container.get("name")
@@ -192,7 +196,7 @@ def _validate_service_groups(model):
                         "container_alias_collision",
                         f"inventory/services/{service_name}.yaml.deploy.containers[{container_index}].name",
                         f"Services {other_service} and {service_name} both declare Container Alias {alias} "
-                        f"in the same network namespace",
+                        f"in {network_description}",
                     )
                 )
             else:

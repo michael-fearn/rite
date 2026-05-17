@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from fortress_inventory.entity_graph import InventoryEntityGraphError
+from fortress_workflows import OperatorWorkflowRunner
+from fortress_workflows.service_group_launch import build_service_group_launch_plan
+from fortress_workflows.service_launch import render_service_launch_result
+
+
+USAGE = "usage: scripts/service-group-launch <group> [--auto-confirm]"
+
+
+def main():
+    parsed = parse_args(sys.argv[1:])
+    if parsed is None:
+        print(USAGE, file=sys.stderr)
+        return 2
+
+    service_group, auto_confirm = parsed
+    repo_root = Path(os.environ.get("FORTRESS_ROOT", Path(__file__).resolve().parents[1]))
+    try:
+        plan = build_service_group_launch_plan(repo_root, service_group, auto_confirm=auto_confirm)
+    except InventoryEntityGraphError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+    result = OperatorWorkflowRunner(cwd=repo_root, auto_confirm=auto_confirm).run(plan)
+    render_service_launch_result(plan, result)
+    return result.return_code
+
+
+def parse_args(args):
+    if not (1 <= len(args) <= 2):
+        return None
+
+    service_group = args[0].removeprefix("group=")
+    if service_group.startswith("-"):
+        return None
+    auto_confirm = False
+    if len(args) == 2:
+        if args[1] != "--auto-confirm":
+            return None
+        auto_confirm = True
+
+    return service_group, auto_confirm
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

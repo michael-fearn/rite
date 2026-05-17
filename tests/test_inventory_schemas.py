@@ -134,6 +134,49 @@ class InventorySchemaTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_service_schema_accepts_explicit_service_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "service_group: media\n"
+                "service_network: media\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_service_schema_rejects_invalid_service_network_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "service_network:\n"
+                "  name: media\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("service_network", result.stdout + result.stderr)
+
     def test_template_schema_accepts_builder_defaults_and_supported_customize_ops(self):
         with tempfile.TemporaryDirectory() as tmp:
             template_yaml = Path(tmp) / "debian-13-base.yaml"
@@ -282,6 +325,31 @@ class InventorySchemaTests(unittest.TestCase):
                 "  advertise_routes:\n"
                 "    - 10.10.0.0/24\n"
                 "    - 10.40.0.0/24\n"
+            )
+
+            result = self.run_schema("inventory/vms/_schema.json", str(vm_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_vm_schema_accepts_launchable_service_group_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vm_yaml = Path(tmp) / "media01.yaml"
+            vm_yaml.write_text(
+                "vmid: 101\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 2\n"
+                "  memory: 4096\n"
+                "cloud_init:\n"
+                "  hostname: media01\n"
+                "launchable_service_groups:\n"
+                "  - name: media\n"
+                "    launch_order:\n"
+                "      - prowlarr\n"
+                "      - sonarr\n"
             )
 
             result = self.run_schema("inventory/vms/_schema.json", str(vm_yaml))

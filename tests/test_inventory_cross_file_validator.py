@@ -29,6 +29,19 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
         self.assertEqual(model.datasets["media"]["path"], "/mnt/pool/media")
 
+    def test_repo_media_vm_declares_media_service_group_launch_order(self):
+        model = load_inventory_tree(REPO_ROOT)
+
+        self.assertEqual(
+            [
+                {
+                    "name": "media",
+                    "launch_order": ["prowlarr", "sonarr", "radarr", "bazarr", "jellyfin", "seerr"],
+                }
+            ],
+            model.vms["media-vm"].get("launchable_service_groups"),
+        )
+
     def test_repo_inventory_does_not_commit_acceptance_ephemeral_datasets(self):
         model = load_inventory_tree(REPO_ROOT)
 
@@ -677,19 +690,170 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
             self.assertNotIn("unpinned_service_image", {error.code for error in validate_inventory_tree(root)})
 
-    def test_service_groups_share_one_backend_vm_and_alias_namespace(self):
+    def test_service_networks_share_one_backend_vm_and_alias_namespace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", service_network="media", container_name="server")
+            self.write_fixture_vm(root, "media02", 102)
+            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", vm="media02", port=3000, service_network="media")
+
+            errors = validate_inventory_tree(root)
+
+            self.assertIn("service_network_spans_backend_vms", {error.code for error in errors})
+            self.assertTrue(
+                any(
+                    error.code == "service_network_spans_backend_vms"
+                    and "Service Network media spans Backend VMs media01 and media02" in error.message
+                    for error in errors
+                )
+            )
+
+            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", vm="media01", port=3000, service_network="media", container_name="server")
+
+            errors = validate_inventory_tree(root)
+
+            self.assertIn("container_alias_collision", {error.code for error in errors})
+            self.assertTrue(
+                any(
+                    error.code == "container_alias_collision"
+                    and "Container Alias server in Service Network media" in error.message
+                    for error in errors
+                )
+            )
+
+    def test_service_group_members_can_use_different_backend_vms_without_service_group_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", service_group="media")
+            self.write_fixture_vm(root, "media02", 102)
+            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", vm="media02", port=3000, service_group="media")
+
+            self.assertNotIn("service_network_spans_backend_vms", {error.code for error in validate_inventory_tree(root)})
+
+    def test_service_group_members_do_not_share_alias_namespace_without_service_network(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
             self.write_fixture_service(root, "immich", service_group="media", container_name="server")
+            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", port=3000, service_group="media", container_name="server")
+
+            self.assertNotIn("container_alias_collision", {error.code for error in validate_inventory_tree(root)})
+
+    def test_launchable_service_group_order_entries_must_reference_services(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_vm(
+                root,
+                "media01",
+                101,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [missing-service]\n"
+                ),
+            )
+
+            self.assertIn("missing_launch_order_service", {error.code for error in validate_inventory_tree(root)})
+
+    def test_launchable_service_group_order_entries_must_match_service_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", service_group="photos")
+            self.write_fixture_vm(
+                root,
+                "media01",
+                101,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [immich]\n"
+                ),
+            )
+
+            self.assertIn("launch_order_service_group_mismatch", {error.code for error in validate_inventory_tree(root)})
+
+    def test_launchable_service_group_order_entries_must_use_declaring_backend_vm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
             self.write_fixture_vm(root, "media02", 102)
-            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", vm="media02", port=3000, service_group="media")
+            self.write_fixture_service(root, "immich", vm="media02", service_group="media")
+            self.write_fixture_vm(
+                root,
+                "media01",
+                101,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [immich]\n"
+                ),
+            )
 
-            self.assertIn("service_group_spans_backend_vms", {error.code for error in validate_inventory_tree(root)})
+            self.assertIn("launch_order_service_backend_vm_mismatch", {error.code for error in validate_inventory_tree(root)})
 
-            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", vm="media01", port=3000, service_group="media", container_name="server")
+    def test_launchable_service_group_order_must_match_every_group_service_on_declaring_vm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", service_group="media")
+            self.write_fixture_service(root, "photos", hostname="gallery.fearn.cloud", port=3000, service_group="media")
+            self.write_fixture_vm(
+                root,
+                "media01",
+                101,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [immich]\n"
+                ),
+            )
 
-            self.assertIn("container_alias_collision", {error.code for error in validate_inventory_tree(root)})
+            self.assertIn("missing_launch_order_service_group_member", {error.code for error in validate_inventory_tree(root)})
+
+            self.write_fixture_vm(
+                root,
+                "media01",
+                101,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [immich, immich, photos]\n"
+                ),
+            )
+
+            self.assertIn("duplicate_launch_order_service", {error.code for error in validate_inventory_tree(root)})
+
+    def test_launchable_service_group_must_be_declared_by_only_one_vm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(root, "immich", service_group="media")
+            self.write_fixture_vm(
+                root,
+                "media01",
+                101,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [immich]\n"
+                ),
+            )
+            self.write_fixture_vm(
+                root,
+                "media02",
+                102,
+                launchable_service_groups=(
+                    "launchable_service_groups:\n"
+                    "  - name: media\n"
+                    "    launch_order: [immich]\n"
+                ),
+            )
+
+            self.assertIn("duplicate_launchable_service_group", {error.code for error in validate_inventory_tree(root)})
 
     def test_isolated_services_have_isolated_alias_namespaces(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1135,7 +1299,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
             self.assertNotIn("reserved_tmp_vm_name", {error.code for error in validate_inventory_tree(root)})
 
-    def write_fixture_vm(self, root, name, vmid, lifecycle=""):
+    def write_fixture_vm(self, root, name, vmid, lifecycle="", launchable_service_groups=""):
         (root / "inventory" / "vms" / f"{name}.yaml").write_text(
             f"vmid: {vmid}\n"
             f"{lifecycle}"
@@ -1148,6 +1312,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             "  memory: 4096\n"
             "cloud_init:\n"
             f"  hostname: {name}\n"
+            f"{launchable_service_groups}"
         )
 
     def write_fixture_service(
@@ -1160,6 +1325,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
         image="ghcr.io/immich-app/immich-server:v1.120.0",
         ingress_enabled=True,
         service_group=None,
+        service_network=None,
         container_name="server",
         published_ports=None,
         depends_on=None,
@@ -1170,6 +1336,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
         if ingress_enabled is not None:
             ingress = f"ingress:\n  enabled: {'true' if ingress_enabled else 'false'}\n"
         group = f"service_group: {service_group}\n" if service_group else ""
+        network = f"service_network: {service_network}\n" if service_network else ""
         hostname_field = f"hostname: {hostname}\n" if hostname else ""
         ports = ""
         if published_ports is not None:
@@ -1186,6 +1353,7 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
         (root / "inventory" / "services" / f"{name}.yaml").write_text(
             f"name: {name}\n"
             f"{group}"
+            f"{network}"
             f"{hostname_field}"
             "backend:\n"
             f"  vm: {vm}\n"

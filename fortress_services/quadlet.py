@@ -169,8 +169,8 @@ def _escape_systemd_path_char(char, at_start):
 
 
 def _service_network_name(service):
-    if service.get("service_group"):
-        return f"fortress-group-{service['service_group']}"
+    if service.get("service_network"):
+        return f"fortress-network-{service['service_network']}"
     return f"fortress-{service['name']}"
 
 

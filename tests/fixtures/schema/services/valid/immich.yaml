@@ -1,6 +1,7 @@
 name: immich
 hostname: photos.fearn.cloud
 service_group: media
+service_network: media
 service_data_owner:
   uid: 1000
   gid: 1000

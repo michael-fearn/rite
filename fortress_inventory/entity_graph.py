@@ -69,6 +69,14 @@ class ServiceLaunchIntent:
 
 
 @dataclass(frozen=True)
+class ServiceGroupLaunchIntent:
+    service_group_name: str
+    backend_vm_name: str
+    service_names: tuple[str, ...]
+    requires_ingress_regeneration: bool
+
+
+@dataclass(frozen=True)
 class HostUpdateImpactedVm:
     vm_name: str
     vmid: int
@@ -194,6 +202,76 @@ class InventoryEntityGraph:
             service_name=service_name,
             backend_vm_name=backend_vm_name,
             requires_ingress_regeneration=service.get("ingress", {}).get("enabled") is True,
+        )
+
+    def service_group_launch_intent(self, service_group_name):
+        member_service_names = tuple(
+            service_name
+            for service_name, service in self._model.services.items()
+            if service.get("service_group") == service_group_name
+        )
+        if not member_service_names:
+            raise InventoryEntityGraphError(f"Service Group {service_group_name} is not declared")
+
+        declaration = None
+        backend_vm_name = None
+        for vm_name, vm in self._model.vms.items():
+            for group in vm.get("launchable_service_groups", []) or []:
+                if group.get("name") == service_group_name:
+                    declaration = group
+                    backend_vm_name = vm_name
+                    break
+            if declaration is not None:
+                break
+
+        if declaration is None:
+            raise InventoryEntityGraphError(
+                f"Service Group {service_group_name} is not launchable; "
+                "no Backend VM declares launch metadata"
+            )
+
+        service_names = tuple(declaration.get("launch_order", []) or [])
+        for service_name in member_service_names:
+            service_backend_vm_name = self._service_backend(service_name).get("vm")
+            if not service_backend_vm_name:
+                raise InventoryEntityGraphError(
+                    f"Service Group Launch {service_group_name} Service {service_name} has no Backend VM"
+                )
+            if service_backend_vm_name not in self._model.vms:
+                raise InventoryEntityGraphError(
+                    f"Service Group Launch {service_group_name} Service {service_name} "
+                    f"references missing Backend VM {service_backend_vm_name}"
+                )
+            if service_backend_vm_name != backend_vm_name:
+                raise InventoryEntityGraphError(
+                    f"Service Group Launch {service_group_name} requires shared Backend VM {backend_vm_name}; "
+                    f"Service {service_name} uses {service_backend_vm_name}"
+                )
+        for service_name in service_names:
+            service = self._model.services.get(service_name)
+            if not service:
+                raise InventoryEntityGraphError(
+                    f"Service Group Launch {service_group_name} references missing Service {service_name}"
+                )
+            if service.get("service_group") != service_group_name:
+                raise InventoryEntityGraphError(
+                    f"Service Group Launch {service_group_name} includes Service {service_name}, "
+                    f"which does not declare Service Group {service_group_name}"
+                )
+        omitted_service_names = sorted(set(member_service_names) - set(service_names))
+        if omitted_service_names:
+            raise InventoryEntityGraphError(
+                f"Service Group Launch {service_group_name} omits Service "
+                f"{omitted_service_names[0]} from Launch Order"
+            )
+        return ServiceGroupLaunchIntent(
+            service_group_name=service_group_name,
+            backend_vm_name=backend_vm_name,
+            service_names=service_names,
+            requires_ingress_regeneration=any(
+                (self._model.services.get(service_name) or {}).get("ingress", {}).get("enabled") is True
+                for service_name in service_names
+            ),
         )
 
     def host_update_reboot_impact(self, host_name):

@@ -1,6 +1,7 @@
 name: identity
 hostname: auth.fearn.cloud
 service_group: identity
+service_network: identity
 service_data_owner:
   uid: 1000
   gid: 1000

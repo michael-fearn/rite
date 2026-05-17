@@ -44,7 +44,16 @@
   "properties": {
     "name": { "type": "string", "minLength": 1 },
     "hostname": { "type": "string", "minLength": 1 },
-    "service_group": { "type": "string", "minLength": 1 },
+    "service_group": {
+      "description": "Logical Service Group for operator workflows; does not imply shared private networking.",
+      "type": "string",
+      "minLength": 1
+    },
+    "service_network": {
+      "description": "VM-local Service Network for shared private Podman networking and Container Alias resolution.",
+      "type": "string",
+      "minLength": 1
+    },
     "service_data_owner": {
       "type": "object",
       "additionalProperties": false,

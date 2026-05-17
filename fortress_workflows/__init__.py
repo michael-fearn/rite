@@ -11,6 +11,7 @@ from fortress_workflows.runner import (
     WorkflowResult,
 )
 from fortress_workflows.host_update import build_host_update_plan
+from fortress_workflows.service_group_launch import build_service_group_launch_plan
 from fortress_workflows.service_launch import build_service_launch_plan, render_service_launch_result
 from fortress_workflows.service_update import build_service_update_plan, render_service_update_result
 from fortress_workflows.template_update import build_template_update_plan
@@ -19,6 +20,7 @@ from fortress_workflows.vm_update import build_vm_update_plan
 
 __all__ = [
     "build_host_update_plan",
+    "build_service_group_launch_plan",
     "build_service_launch_plan",
     "build_service_update_plan",
     "build_template_update_plan",

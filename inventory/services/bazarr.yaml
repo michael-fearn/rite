@@ -1,6 +1,7 @@
 name: bazarr
 hostname: bazarr.fearn.cloud
 service_group: media
+service_network: media
 service_data_owner:
   uid: 1001
   gid: 1001

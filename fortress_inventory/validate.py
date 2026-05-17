@@ -21,6 +21,7 @@ from .validation.services import (
     validate_service_share_backed_volumes,
 )
 from .validation.vms import (
+    validate_vm_launchable_service_groups,
     validate_vm_inventory_policy,
     validate_vm_mounts,
     validate_vm_refs,
@@ -47,6 +48,7 @@ def validate_inventory_model(model, allow_ephemeral_datasets=False):
     errors.extend(validate_service_share_backed_volumes(model))
     errors.extend(validate_vm_inventory_policy(model))
     errors.extend(validate_vm_refs(model))
+    errors.extend(validate_vm_launchable_service_groups(model))
     errors.extend(validate_dataset_names(model))
     errors.extend(validate_dataset_nas_refs(model))
     errors.extend(

@@ -24,5 +24,15 @@ mounts:
     protocol: nfs
     mount_point: /mnt/nas/media
     access: read_write
+launchable_service_groups:
+  - name: media
+    launch_order:
+      - prowlarr
+      - sonarr
+      - radarr
+      - bazarr
+      - jellyfin
+      - seerr
 backup:
   enabled: true
+ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEu1qIgZagRPd76ypc9gavg2LeiwL7nHdMrUpaDmK1Ow fortress-vm-prepare:media-vm:2026-05-17T19:48:31Z

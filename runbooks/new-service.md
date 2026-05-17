@@ -19,7 +19,7 @@ Ingress defaults are intentionally small in issue 07. `ingress.enabled: true` me
 
 Published Ports live under each Quadlet container. A Published Port defaults to TCP and uses the container port as the host port when `host` is absent. Set `bind: 127.0.0.1` for ports intended only for Ingress or VM-local callers.
 
-Use a Service Group when multiple Services on the same Backend VM intentionally share one VM-local Podman network. Within a Service, containers always share the Service network. Each container name becomes its Container Alias on that network; use that alias for same-network communication rather than the fortress runtime container name.
+Use `service_group` when the Service belongs to a logical operator grouping, such as a set that should be launched together through Service Group Launch. Use `service_network` when multiple Services on the same Backend VM intentionally share one Service Network, a VM-local Podman network. Within a Service, containers always share the Service network. Each container name becomes its Container Alias on that network; use that alias for same-network communication rather than the fortress runtime container name. Service Group membership alone does not create shared private networking.
 
 ## Declare Service Ingress
 
@@ -126,7 +126,23 @@ just service-launch service=<service> auto_confirm=true
 
 Service Launch is a wrapper over `vm-up`, `service-deploy`, and conditional `ingress-regenerate`. It resolves the named Service, validates its declared `backend.vm`, runs `vm-up <backend-vm>`, runs `service-deploy <service>`, and runs `ingress-regenerate` only when that Service declares `ingress.enabled: true`.
 
-Host Configure, NAS Reconcile, and Ingress infrastructure readiness are prerequisites. Service Launch does not run `host-bootstrap`, `host-configure`, `nas-reconcile`, `service-deploy internal-ingress`, or Service Deploy for DNS Services. It deploys only the named Service, even when other Services share the same Backend VM or Service Group.
+Host Configure, NAS Reconcile, and Ingress infrastructure readiness are prerequisites. Service Launch does not run `host-bootstrap`, `host-configure`, `nas-reconcile`, `service-deploy internal-ingress`, or Service Deploy for DNS Services. It deploys only the named Service, even when other Services share the same Backend VM, Service Group, or Service Network.
+
+## Service Group Launch
+
+Use Service Group Launch when the Service Group has a VM-declared Service Group Launch Order and the whole ordered group should be made usable from Inventory:
+
+```sh
+just service-group-launch <group>
+```
+
+The Just recipe calls `service-group-launch <group>` and accepts `auto_confirm=true` for the shared Backend VM approval gate:
+
+```sh
+just service-group-launch <group> auto_confirm=true
+```
+
+Service Group Launch is group-targeted Launch, not Service Update. It runs VM Lifecycle Convergence once for the shared Backend VM, runs ordinary Service Deploy once for each Service in the declared order, and runs Ingress Regeneration once at the end when any launched Service declares Ingress. There is no Service Group Update workflow.
 
 ## Service-layer Acceptance Test
 

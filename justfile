@@ -56,6 +56,10 @@ service-deploy service:
 service-launch service auto_confirm="false":
     @if [ "{{auto_confirm}}" = "true" ] || [ "{{auto_confirm}}" = "auto_confirm=true" ]; then ./scripts/service-launch {{service}} --auto-confirm; else ./scripts/service-launch {{service}}; fi
 
+# Launch a Service Group by converging its shared Backend VM, deploying Services in order, and refreshing Ingress once.
+service-group-launch group auto_confirm="false":
+    @if [ "{{auto_confirm}}" = "true" ] || [ "{{auto_confirm}}" = "auto_confirm=true" ]; then ./scripts/service-group-launch {{group}} --auto-confirm; else ./scripts/service-group-launch {{group}}; fi
+
 # Apply routine in-place runtime maintenance to one Service.
 service-update service auto_confirm="false":
     @if [ "{{auto_confirm}}" = "true" ] || [ "{{auto_confirm}}" = "auto_confirm=true" ]; then ./scripts/service-update {{service}} --auto-confirm; else ./scripts/service-update {{service}}; fi

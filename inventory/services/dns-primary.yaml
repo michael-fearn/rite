@@ -1,5 +1,6 @@
 name: dns-primary
 service_group: dns-primary
+service_network: dns-primary
 service_data_owner:
   uid: 1000
   gid: 1000

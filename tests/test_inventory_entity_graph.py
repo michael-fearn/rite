@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from fortress_inventory.entity_graph import (
     AcceptanceEphemeralDatasetFact,
@@ -11,6 +12,7 @@ from fortress_inventory.entity_graph import (
     HostBridgeFact,
     InventoryEntityGraph,
     InventoryEntityGraphError,
+    ServiceGroupLaunchIntent,
     ServiceLaunchIntent,
     ServiceShareBackedVolumeFact,
     TemplateLineageVmFact,
@@ -19,7 +21,10 @@ from fortress_inventory.entity_graph import (
     VmMountFact,
     VmUpdateRebootImpact,
 )
-from fortress_inventory.model import InventoryModel
+from fortress_inventory.model import InventoryModel, load_inventory_tree
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def inventory_model(hosts=None, vms=None, services=None, datasets=None, nas_endpoints=None):
@@ -488,6 +493,156 @@ class InventoryEntityGraphTests(unittest.TestCase):
             "Service photos references missing Backend VM missing-vm",
         ):
             graph.service_launch_intent("photos")
+
+    def test_resolves_media_service_group_launch_intent_from_inventory(self):
+        graph = InventoryEntityGraph(load_inventory_tree(REPO_ROOT))
+
+        self.assertEqual(
+            ServiceGroupLaunchIntent(
+                service_group_name="media",
+                backend_vm_name="media-vm",
+                service_names=("prowlarr", "sonarr", "radarr", "bazarr", "jellyfin", "seerr"),
+                requires_ingress_regeneration=True,
+            ),
+            graph.service_group_launch_intent("media"),
+        )
+
+    def test_service_group_launch_intent_rejects_unknown_service_group(self):
+        graph = InventoryEntityGraph(inventory_model())
+
+        with self.assertRaisesRegex(
+            InventoryEntityGraphError,
+            "Service Group missing is not declared",
+        ):
+            graph.service_group_launch_intent("missing")
+
+    def test_service_group_launch_intent_rejects_group_without_launch_metadata(self):
+        model = inventory_model(
+            services={
+                "photos": {
+                    "service_group": "media",
+                    "backend": {"vm": "media-vm"},
+                },
+            },
+            vms={"media-vm": {}},
+        )
+        graph = InventoryEntityGraph(model)
+
+        with self.assertRaisesRegex(
+            InventoryEntityGraphError,
+            "Service Group media is not launchable; no Backend VM declares launch metadata",
+        ):
+            graph.service_group_launch_intent("media")
+
+    def test_service_group_launch_intent_rejects_missing_backend_vm(self):
+        model = inventory_model(
+            services={
+                "photos": {
+                    "service_group": "media",
+                    "backend": {"vm": "missing-vm"},
+                },
+            },
+            vms={
+                "media-vm": {
+                    "launchable_service_groups": [
+                        {"name": "media", "launch_order": ["photos"]},
+                    ],
+                },
+            },
+        )
+        graph = InventoryEntityGraph(model)
+
+        with self.assertRaisesRegex(
+            InventoryEntityGraphError,
+            "Service Group Launch media Service photos references missing Backend VM missing-vm",
+        ):
+            graph.service_group_launch_intent("media")
+
+    def test_service_group_launch_intent_rejects_mixed_backend_vms(self):
+        model = inventory_model(
+            services={
+                "photos": {
+                    "service_group": "media",
+                    "backend": {"vm": "media-vm"},
+                },
+                "downloads": {
+                    "service_group": "media",
+                    "backend": {"vm": "download-vm"},
+                },
+            },
+            vms={
+                "media-vm": {
+                    "launchable_service_groups": [
+                        {"name": "media", "launch_order": ["photos", "downloads"]},
+                    ],
+                },
+                "download-vm": {},
+            },
+        )
+        graph = InventoryEntityGraph(model)
+
+        with self.assertRaisesRegex(
+            InventoryEntityGraphError,
+            "Service Group Launch media requires shared Backend VM media-vm; Service downloads uses download-vm",
+        ):
+            graph.service_group_launch_intent("media")
+
+    def test_service_group_launch_intent_rejects_mixed_backend_group_members(self):
+        model = inventory_model(
+            services={
+                "photos": {
+                    "service_group": "media",
+                    "backend": {"vm": "media-vm"},
+                },
+                "downloads": {
+                    "service_group": "media",
+                    "backend": {"vm": "download-vm"},
+                },
+            },
+            vms={
+                "media-vm": {
+                    "launchable_service_groups": [
+                        {"name": "media", "launch_order": ["photos"]},
+                    ],
+                },
+                "download-vm": {},
+            },
+        )
+        graph = InventoryEntityGraph(model)
+
+        with self.assertRaisesRegex(
+            InventoryEntityGraphError,
+            "Service Group Launch media requires shared Backend VM media-vm; Service downloads uses download-vm",
+        ):
+            graph.service_group_launch_intent("media")
+
+    def test_service_group_launch_intent_rejects_omitted_group_member(self):
+        model = inventory_model(
+            services={
+                "photos": {
+                    "service_group": "media",
+                    "backend": {"vm": "media-vm"},
+                },
+                "catalog": {
+                    "service_group": "media",
+                    "backend": {"vm": "media-vm"},
+                },
+            },
+            vms={
+                "media-vm": {
+                    "launchable_service_groups": [
+                        {"name": "media", "launch_order": ["photos"]},
+                    ],
+                },
+            },
+        )
+        graph = InventoryEntityGraph(model)
+
+        with self.assertRaisesRegex(
+            InventoryEntityGraphError,
+            "Service Group Launch media omits Service catalog from Launch Order",
+        ):
+            graph.service_group_launch_intent("media")
 
     def test_resolves_vm_placement_host_name_from_vm_name(self):
         model = inventory_model(

@@ -70,9 +70,9 @@ def regenerate_ingress(repo_root, model, caddy_routes, dns_record_sets):
             return 1
         if not _run_step(
             repo_root,
-            f"reload Pi-hole DNS for {service_name} on {vm}",
+            f"restart Pi-hole DNS for {service_name} on {vm}",
             vm,
-            ["sudo", "podman", "exec", f"fortress-{service_name}-pihole", "pihole", "reloaddns"],
+            ["sudo", "systemctl", "restart", f"fortress-{service_name}-pihole.service"],
         ):
             return 1
 

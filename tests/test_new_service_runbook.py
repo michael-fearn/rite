@@ -21,6 +21,9 @@ class NewServiceRunbookTests(unittest.TestCase):
             "Ingress defaults",
             "Published Ports",
             "Service Group",
+            "service_group",
+            "Service Network",
+            "service_network",
             "Container Alias",
             "Service-owned volume",
             "Share-backed Volume",
@@ -140,10 +143,10 @@ class NewServiceRunbookTests(unittest.TestCase):
             [{"secret": "secrets.demo_password", "env": "DEMO_PASSWORD_FILE"}],
             containers[0]["secrets"],
         )
-        self.assertIn("fortress-group-service-demo.network", rendered.artifacts_by_filename)
+        self.assertIn("fortress-fortress-service-demo.network", rendered.artifacts_by_filename)
         web = rendered.artifacts_by_filename["fortress-fortress-service-demo-web.container"]
         self.assertIn("NetworkAlias=web\n", web.content)
-        self.assertIn("Network=fortress-group-service-demo\n", web.content)
+        self.assertIn("Network=fortress-fortress-service-demo\n", web.content)
         self.assertIn("Requires=fortress-fortress-service-demo-postgres.service fortress-fortress-service-demo-redis.service mnt-nfs\\x2ddemo.mount\n", web.content)
         self.assertIn("PublishPort=127.0.0.1:8080:80/tcp\n", web.content)
         self.assertIn("PublishPort=127.0.0.1:18080:80/tcp\n", web.content)
@@ -192,6 +195,20 @@ class NewServiceRunbookTests(unittest.TestCase):
             "wrapper over `vm-up`, `service-deploy`, and conditional `ingress-regenerate`",
             "Host Configure, NAS Reconcile, and Ingress infrastructure readiness are prerequisites",
             "does not run `host-bootstrap`, `host-configure`, `nas-reconcile`, `service-deploy internal-ingress`, or Service Deploy for DNS Services",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, content)
+
+    def test_runbook_documents_service_group_launch_without_update_semantics(self):
+        content = (REPO_ROOT / "runbooks" / "new-service.md").read_text()
+
+        for phrase in [
+            "Service Group Launch",
+            "just service-group-launch <group>",
+            "service-group-launch <group>",
+            "VM-declared Service Group Launch Order",
+            "not Service Update",
+            "There is no Service Group Update workflow",
         ]:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, content)

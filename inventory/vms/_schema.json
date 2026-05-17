@@ -92,6 +92,23 @@
         }
       }
     },
+    "launchable_service_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "launch_order"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "launch_order": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
     "tailnet_subnet_router": {
       "type": "object",
       "additionalProperties": false,

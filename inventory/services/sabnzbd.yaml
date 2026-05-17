@@ -1,6 +1,7 @@
 name: sabnzbd
 hostname: sabnzbd.fearn.cloud
 service_group: download
+service_network: download
 service_data_owner:
   uid: 1001
   gid: 1001

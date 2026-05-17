@@ -48,7 +48,7 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
     def test_runbook_names_the_generated_quadlet_artifacts(self):
         content = (REPO_ROOT / "runbooks" / "dns-architecture.md").read_text()
 
-        self.assertIn("fortress-group-dns-primary.network", content)
+        self.assertIn("fortress-network-dns-primary.network", content)
         self.assertIn("fortress-dns-primary-pihole.container", content)
         self.assertIn("fortress-dns-primary-unbound.container", content)
         self.assertIn("fortress-dns-primary-pihole.service", content)

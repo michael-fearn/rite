@@ -21,7 +21,7 @@ scripts/service-deploy dns-primary
 
 That deploy renders the shared network and container artifacts:
 
-- `fortress-group-dns-primary.network`
+- `fortress-network-dns-primary.network`
 - `fortress-dns-primary-pihole.container`
 - `fortress-dns-primary-unbound.container`
 
@@ -121,7 +121,8 @@ capabilities:
 `just ingress-regenerate` renders the fortress-owned generated file for every
 declared Ingress DNS Target, installs it at
 `/srv/services/<dns-service>/pihole/etc-dnsmasq.d/99-fortress-ingress.conf`,
-and reloads the target DNS Service. The file appears inside the Pi-hole
+and restarts the target Pi-hole DNS Service so FTL rereads dnsmasq config
+from `/etc/dnsmasq.d`. The file appears inside the Pi-hole
 container at `/etc/dnsmasq.d/99-fortress-ingress.conf`. It contains generated
 Ingress DNS Records for Ingress-enabled Services and declared Host Ingress
 Routes. It is replaced from Inventory on every run, so stale generated records

@@ -11,10 +11,11 @@ GOLDEN_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "quadlet_rendering"
 
 
 class ServiceQuadletRenderingTests(unittest.TestCase):
-    def test_golden_service_group_multi_container_rendering(self):
+    def test_golden_service_network_multi_container_rendering(self):
         service = {
             "name": "immich",
             "service_group": "media",
+            "service_network": "media",
             "service_data_owner": {"uid": 1000, "gid": 1000},
             "backend": {"vm": "media01", "port": 2283},
             "deploy": {
@@ -68,7 +69,7 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
 
         rendered = render_quadlet_service(service, vm)
 
-        self.assert_golden_artifacts(rendered, GOLDEN_FIXTURES / "service_group_multi")
+        self.assert_golden_artifacts(rendered, GOLDEN_FIXTURES / "service_network_multi")
         self.assertEqual(
             [("/srv/services/immich/upload", 1000, 1000)],
             [
@@ -350,10 +351,11 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
         self.assertNotIn("health", server.content.lower())
         self.assertNotIn("ready", server.content.lower())
 
-    def test_service_group_uses_shared_network_without_changing_container_identity(self):
+    def test_service_network_uses_shared_network_without_changing_container_identity(self):
         service = {
             "name": "immich",
-            "service_group": "media",
+            "service_group": "media-apps",
+            "service_network": "media",
             "backend": {"vm": "media01", "port": 2283},
             "deploy": {
                 "type": "quadlet",
@@ -368,13 +370,36 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
 
         rendered = render_quadlet_service(service, {})
 
-        self.assertIn("fortress-group-media.network", rendered.artifacts_by_filename)
-        network = rendered.artifacts_by_filename["fortress-group-media.network"]
+        self.assertIn("fortress-network-media.network", rendered.artifacts_by_filename)
+        network = rendered.artifacts_by_filename["fortress-network-media.network"]
         container = rendered.artifacts_by_filename["fortress-immich-server.container"]
-        self.assertIn("NetworkName=fortress-group-media\n", network.content)
+        self.assertIn("NetworkName=fortress-network-media\n", network.content)
         self.assertIn("ContainerName=fortress-immich-server\n", container.content)
-        self.assertIn("Network=fortress-group-media\n", container.content)
+        self.assertIn("Network=fortress-network-media\n", container.content)
         self.assertIn("NetworkAlias=server\n", container.content)
+
+    def test_service_group_without_service_network_keeps_isolated_network(self):
+        service = {
+            "name": "seerr",
+            "service_group": "media-apps",
+            "backend": {"vm": "media01", "port": 5055},
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "server",
+                        "image": "ghcr.io/seerr-team/seerr:v3.2.0",
+                    }
+                ],
+            },
+        }
+
+        rendered = render_quadlet_service(service, {})
+
+        self.assertIn("fortress-seerr.network", rendered.artifacts_by_filename)
+        container = rendered.artifacts_by_filename["fortress-seerr-server.container"]
+        self.assertIn("Network=fortress-seerr\n", container.content)
+        self.assertNotIn("fortress-network-media-apps", container.content)
 
     def test_service_data_owner_applies_only_to_service_owned_volume_paths(self):
         service = {

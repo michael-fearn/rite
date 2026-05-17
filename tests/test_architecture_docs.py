@@ -14,6 +14,7 @@ class ArchitectureDocsTests(unittest.TestCase):
             "Operator Workflow Runner",
             "fortress_workflows.vm_lifecycle",
             "fortress_workflows.service_launch",
+            "fortress_workflows.service_group_launch",
             "fortress_workflows.host_readiness",
             "fortress_workflows.runner",
             "plan builders own domain-specific ceremony rules",
@@ -30,6 +31,7 @@ class ArchitectureDocsTests(unittest.TestCase):
         for path in [
             REPO_ROOT / "scripts" / "vm-up",
             REPO_ROOT / "scripts" / "service-launch",
+            REPO_ROOT / "scripts" / "service-group-launch",
             REPO_ROOT / "scripts" / "host-up",
         ]:
             with self.subTest(path=path):

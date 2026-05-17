@@ -90,6 +90,6 @@ just service-update <service> auto_confirm=true
 
 Service Update runs Service Deploy first so generated artifacts, Service Secrets, Service-owned directories, and systemd units match current Inventory. It advances only to declared runtime references. Selecting a newer image tag, package stream, or application version happens by changing Inventory first.
 
-After Service Deploy, Service Update restarts all fortress-owned units for the named Service and verifies all fortress-owned units for the named Service reach active state. It updates only the named Service and does not restart Service Group peers implicitly, even when other Services share the same Backend VM or Service Group.
+After Service Deploy, Service Update restarts all fortress-owned units for the named Service and verifies all fortress-owned units for the named Service reach active state. It updates only the named Service and does not restart Service Group peers implicitly, even when other Services share the same Backend VM, Service Group, or Service Network.
 
-Out of scope for Service Update: it does not choose newer runtime references outside Inventory, does not coordinate Service Group Update, does not run application health checks beyond active systemd state, and does not perform database migrations or application breaking migrations.
+Out of scope for Service Update: it does not choose newer runtime references outside Inventory, does not coordinate grouped Service maintenance, does not run application health checks beyond active systemd state, and does not perform database migrations or application breaking migrations. There is no Service Group Update workflow.

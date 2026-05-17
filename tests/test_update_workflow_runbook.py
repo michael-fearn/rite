@@ -50,6 +50,7 @@ class UpdateWorkflowRunbookTests(unittest.TestCase):
             "updates only the named Service",
             "does not restart Service Group peers implicitly",
             "all fortress-owned units for the named Service reach active state",
+            "There is no Service Group Update workflow",
         ]
 
         for phrase in expected_phrases:

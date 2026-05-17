@@ -7,7 +7,7 @@ BindsTo=fortress-immich-postgres.service
 [Container]
 ContainerName=fortress-immich-server
 Image=ghcr.io/immich-app/immich-server:v1.120.0
-Network=fortress-group-media
+Network=fortress-network-media
 NetworkAlias=server
 PublishPort=127.0.0.1:2283:2283/tcp
 Volume=/srv/services/immich/upload:/usr/src/app/upload:rw

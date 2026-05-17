@@ -485,6 +485,7 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             (root / "inventory" / "services" / "immich.yaml").write_text(
                 "name: immich\n"
                 "service_group: media\n"
+                "service_network: media\n"
                 "backend:\n"
                 "  vm: media01\n"
                 "  port: 2283\n"
@@ -513,11 +514,11 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             extra_vars = json.loads(calls_log.read_text().split("--extra-vars ", 1)[1])
             self.assertEqual(
-                ["fortress-group-media.network", "fortress-immich-server.container", "fortress-immich-postgres.container"],
+                ["fortress-network-media.network", "fortress-immich-server.container", "fortress-immich-postgres.container"],
                 [artifact["filename"] for artifact in extra_vars["fortress_quadlet_artifacts"]],
             )
             self.assertEqual(
-                ["fortress-group-media-network.service"],
+                ["fortress-network-media-network.service"],
                 extra_vars["fortress_service_network_units"],
             )
             self.assertEqual(
