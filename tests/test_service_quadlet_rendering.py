@@ -266,24 +266,50 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
         self.assertIn("PublishPort=0.0.0.0:53:53/udp\n", container.content)
         self.assertNotIn("tcp,udp", container.content)
 
-    def test_dns_primary_pihole_receives_web_api_password_file_secret(self):
-        service = load_inventory_tree(REPO_ROOT).services["dns-primary"]
+    def test_dns_pihole_services_receive_web_api_password_file_secret(self):
+        services = ["dns-primary", "dns-secondary"]
 
-        rendered = render_quadlet_service(service, {})
-        container = rendered.artifacts_by_filename["fortress-dns-primary-pihole.container"]
+        for service_name in services:
+            with self.subTest(service=service_name):
+                service = load_inventory_tree(REPO_ROOT).services[service_name]
 
-        self.assertIn("Secret=fortress_dns-primary_web_api_password\n", container.content)
-        self.assertIn(
-            "Environment=WEBPASSWORD_FILE=fortress_dns-primary_web_api_password\n",
-            container.content,
-        )
-        self.assertNotIn(
-            "Environment=WEBPASSWORD_FILE=/run/secrets/fortress_dns-primary_web_api_password\n",
-            container.content,
-        )
-        self.assertNotIn("created:", container.content)
-        self.assertNotIn("version:", container.content)
-        self.assertNotIn("value:", container.content)
+                rendered = render_quadlet_service(service, {})
+                container = rendered.artifacts_by_filename[f"fortress-{service_name}-pihole.container"]
+
+                secret_name = f"fortress_{service_name}_web_api_password"
+                self.assertIn(f"Secret={secret_name}\n", container.content)
+                self.assertIn(
+                    f"Environment=WEBPASSWORD_FILE={secret_name}\n",
+                    container.content,
+                )
+                self.assertNotIn(
+                    f"Environment=WEBPASSWORD_FILE=/run/secrets/{secret_name}\n",
+                    container.content,
+                )
+                self.assertNotIn("created:", container.content)
+                self.assertNotIn("version:", container.content)
+                self.assertNotIn("value:", container.content)
+
+    def test_dns_unbound_services_seed_empty_default_include_files(self):
+        services = ["dns-primary", "dns-secondary"]
+
+        for service_name in services:
+            with self.subTest(service=service_name):
+                service = load_inventory_tree(REPO_ROOT).services[service_name]
+
+                rendered = render_quadlet_service(service, {})
+
+                self.assertEqual(
+                    [
+                        (f"/srv/services/{service_name}/unbound/a-records.conf", "", 1000, 1000, "0644"),
+                        (f"/srv/services/{service_name}/unbound/srv-records.conf", "", 1000, 1000, "0644"),
+                        (f"/srv/services/{service_name}/unbound/forward-records.conf", "", 1000, 1000, "0644"),
+                    ],
+                    [
+                        (file.path, file.content, file.uid, file.gid, file.mode)
+                        for file in rendered.service_data_files
+                    ],
+                )
 
     def test_container_renders_non_secret_env_and_service_secret_file_env(self):
         service = {

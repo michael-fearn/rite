@@ -15,13 +15,20 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
             "Pi-hole + Unbound DNS architecture",
             "two-container Quadlet Service",
             "dns-primary-vm",
+            "dns-secondary-vm",
             "10.40.0.11",
+            "10.40.0.18",
             "VLAN 40",
             "inventory/vms/dns-primary-vm.yaml",
             "inventory/services/dns-primary.yaml",
             "inventory/services/dns-primary.sops.yaml",
+            "inventory/vms/dns-secondary-vm.yaml",
+            "inventory/services/dns-secondary.yaml",
+            "inventory/services/dns-secondary.sops.yaml",
             "scripts/vm-up dns-primary-vm",
+            "scripts/vm-up dns-secondary-vm",
             "scripts/service-deploy dns-primary",
+            "scripts/service-deploy dns-secondary",
             "TCP and UDP port 53",
             "WEBPASSWORD_FILE",
             "env_value: secret_name",
@@ -30,11 +37,15 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
             "FTLCONF_dns_upstreams: unbound",
             "FTLCONF_dns_listeningMode: all",
             "/srv/services/dns-primary/pihole/etc-dnsmasq.d/99-fortress-ingress.conf",
+            "/srv/services/dns-secondary/pihole/etc-dnsmasq.d/99-fortress-ingress.conf",
             "/etc/dnsmasq.d/99-fortress-ingress.conf",
             "does not mutate Pi-hole manual records",
             "/srv/services/dns-primary/pihole/etc-pihole",
             "/srv/services/dns-primary/unbound",
+            "/srv/services/dns-secondary/pihole/etc-pihole",
+            "/srv/services/dns-secondary/unbound",
             "dig @10.40.0.11 example.com A",
+            "dig @10.40.0.18 example.com A",
             "just acceptance-dns-primary internal=internal-ingress.fearn.cloud",
             "Guest must not use internal DNS",
             "DNS-001-ALLOW-INTERNAL-RESOLUTION",
@@ -53,23 +64,32 @@ class DNSArchitectureRunbookTests(unittest.TestCase):
         self.assertIn("fortress-dns-primary-unbound.container", content)
         self.assertIn("fortress-dns-primary-pihole.service", content)
         self.assertIn("fortress-dns-primary-unbound.service", content)
+        self.assertIn("fortress-network-dns-secondary.network", content)
+        self.assertIn("fortress-dns-secondary-pihole.container", content)
+        self.assertIn("fortress-dns-secondary-unbound.container", content)
+        self.assertIn("fortress-dns-secondary-pihole.service", content)
+        self.assertIn("fortress-dns-secondary-unbound.service", content)
 
-    def test_dns_primary_service_secret_sibling_sops_file_is_structured_and_encrypted(self):
-        sops_file = REPO_ROOT / "inventory" / "services" / "dns-primary.sops.yaml"
+    def test_dns_service_secret_sibling_sops_files_are_structured_and_encrypted(self):
+        sops_files = [
+            REPO_ROOT / "inventory" / "services" / "dns-primary.sops.yaml",
+            REPO_ROOT / "inventory" / "services" / "dns-secondary.sops.yaml",
+        ]
 
-        self.assertTrue(sops_file.is_file())
-        content = sops_file.read_text()
-        for phrase in [
-            "secrets:",
-            "web_api_password:",
-            "created:",
-            "version:",
-            "value:",
-            "sops:",
-            "ENC[AES256_GCM",
-        ]:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, content)
+        for sops_file in sops_files:
+            with self.subTest(sops_file=sops_file.name):
+                self.assertTrue(sops_file.is_file())
+                content = sops_file.read_text()
+                for phrase in [
+                    "secrets:",
+                    "web_api_password:",
+                    "created:",
+                    "version:",
+                    "value:",
+                    "sops:",
+                    "ENC[AES256_GCM",
+                ]:
+                    self.assertIn(phrase, content)
 
     def test_runbook_documents_ingress_dns_records_and_targets(self):
         content = (REPO_ROOT / "runbooks" / "dns-architecture.md").read_text()

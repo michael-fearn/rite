@@ -1,34 +1,44 @@
 # Pi-hole + Unbound DNS architecture
 
-`dns-primary` is the primary LAN resolver Service. It runs on `dns-primary-vm`
-at `10.40.0.11` in `VLAN 40` and is declared by:
+`dns-primary` and `dns-secondary` are functionally identical LAN resolver
+Services. They run on Infrastructure VLAN DNS VMs and are declared by:
 
 - `inventory/vms/dns-primary-vm.yaml`
 - `inventory/services/dns-primary.yaml`
 - `inventory/services/dns-primary.sops.yaml`
+- `inventory/vms/dns-secondary-vm.yaml`
+- `inventory/services/dns-secondary.yaml`
+- `inventory/services/dns-secondary.sops.yaml`
 
-The VM is provisioned through the standard VM lifecycle path:
+Each VM is provisioned through the standard VM lifecycle path:
 
 ```bash
 scripts/vm-up dns-primary-vm
+scripts/vm-up dns-secondary-vm
 ```
 
-The resolver Service is deployed through the standard Service deploy path:
+Each resolver Service is deployed through the standard Service deploy path:
 
 ```bash
 scripts/service-deploy dns-primary
+scripts/service-deploy dns-secondary
 ```
 
-That deploy renders the shared network and container artifacts:
+Those deploys render per-Service shared network and container artifacts:
 
 - `fortress-network-dns-primary.network`
 - `fortress-dns-primary-pihole.container`
 - `fortress-dns-primary-unbound.container`
+- `fortress-network-dns-secondary.network`
+- `fortress-dns-secondary-pihole.container`
+- `fortress-dns-secondary-unbound.container`
 
 The corresponding systemd services are:
 
 - `fortress-dns-primary-pihole.service`
 - `fortress-dns-primary-unbound.service`
+- `fortress-dns-secondary-pihole.service`
+- `fortress-dns-secondary-unbound.service`
 
 ## Container split
 
@@ -48,10 +58,11 @@ FTLCONF_dns_listeningMode: all
 ```
 
 This keeps LAN-facing filtering and recursive resolution separate while still
-deploying them as one Service unit group. The Service enables Ingress for the
-Pi-hole web UI at `dns-primary.fearn.cloud`; DNS resolver traffic still reaches
-the VM directly through firewall rule `DNS-001-ALLOW-INTERNAL-RESOLUTION`, not
-through Caddy.
+deploying them as one Service unit group. Each DNS Service enables Ingress for
+its Pi-hole web UI at `dns-primary.fearn.cloud` or
+`dns-secondary.fearn.cloud`; DNS resolver traffic still reaches the DNS VM
+directly through firewall rule `DNS-001-ALLOW-INTERNAL-RESOLUTION`, not through
+Caddy.
 
 `FTLCONF_dns_listeningMode: all` is required for Pi-hole v6 in this container
 topology so queries from routed LAN clients are accepted instead of being
@@ -59,42 +70,53 @@ treated as non-local Docker-network traffic.
 
 ## Pi-hole web/API password
 
-The Pi-hole admin web/API password is a Service Secret in the Service Sibling
-SOPS File at `inventory/services/dns-primary.sops.yaml`. The structured entry is
-stored at `secrets.web_api_password.value` with `created` and `version` metadata
-beside it.
+The Pi-hole admin web/API password is a Service Secret in each Service Sibling
+SOPS File: `inventory/services/dns-primary.sops.yaml` and
+`inventory/services/dns-secondary.sops.yaml`. The structured entry is stored at
+`secrets.web_api_password.value` with `created` and `version` metadata beside
+it.
 
-The `dns-primary` Service declaration maps that Fortress purpose name to
-Pi-hole's native `WEBPASSWORD_FILE` environment variable. `service-deploy`
-installs only the nested `value` bytes as the Podman secret. Pi-hole's v6
-container expects `WEBPASSWORD_FILE` to contain the secret name and then reads
-`/run/secrets/$WEBPASSWORD_FILE`, so `dns-primary` declares
+Each DNS Service declaration maps that Fortress purpose name to Pi-hole's
+native `WEBPASSWORD_FILE` environment variable. `service-deploy` installs only
+the nested `value` bytes as the Podman secret. Pi-hole's v6 container expects
+`WEBPASSWORD_FILE` to contain the secret name and then reads
+`/run/secrets/$WEBPASSWORD_FILE`, so each DNS Service declares
 `env_value: secret_name`. The rendered Quadlet contains the Podman secret name,
 not the password.
 
 ## Addressing and ports
 
-`dns-primary-vm` is the Infrastructure VLAN resolver:
+`dns-primary-vm` is the primary Infrastructure VLAN resolver:
 
 - Address: `10.40.0.11/24`
 - Gateway: `10.40.0.1`
 - Host: `straylight`
 - VLAN: `VLAN 40`
 
-Pi-hole must listen on `10.40.0.11` for TCP and UDP port 53. The Service Backend
-port is the Pi-hole web UI published port, `8080`, so Caddy routes
-`dns-primary.fearn.cloud` to the Pi-hole admin UI while resolver traffic remains
-direct TCP/UDP 53 access to the DNS VM.
+`dns-secondary-vm` is the secondary Infrastructure VLAN resolver:
 
-Because `dns-primary` is also the Pi-hole-backed Ingress DNS Target, Service
+- Address: `10.40.0.18/24`
+- Gateway: `10.40.0.1`
+- Host: `molly`
+- VLAN: `VLAN 40`
+
+Pi-hole must listen on each DNS VM's resolver address for TCP and UDP port 53.
+The Service Backend port is the Pi-hole web UI published port, `8080`, so
+Caddy routes `dns-primary.fearn.cloud` and `dns-secondary.fearn.cloud` to the
+matching Pi-hole admin UI while resolver traffic remains direct TCP/UDP 53
+access to the DNS VM.
+
+Because both DNS Services are also Pi-hole-backed Ingress DNS Targets, Service
 Deploy enables Pi-hole v6 `/etc/dnsmasq.d` compatibility with
 `FTLCONF_misc_etc_dnsmasq_d=true`. Ingress Regeneration owns the generated DNS
-record file at
-`/srv/services/dns-primary/pihole/etc-dnsmasq.d/99-fortress-ingress.conf`,
-which is mounted into the Pi-hole container at
-`/etc/dnsmasq.d/99-fortress-ingress.conf`. That file is the fortress-owned
-Ingress DNS Record Set: it is authoritatively replaced from current Inventory
-and does not mutate Pi-hole manual records.
+record files at
+`/srv/services/dns-primary/pihole/etc-dnsmasq.d/99-fortress-ingress.conf` and
+`/srv/services/dns-secondary/pihole/etc-dnsmasq.d/99-fortress-ingress.conf`,
+which are mounted into the Pi-hole containers at
+`/etc/dnsmasq.d/99-fortress-ingress.conf`. Those files are the fortress-owned
+Ingress DNS Record Set on each peer: they are authoritatively replaced from
+current Inventory and do not mutate Pi-hole manual records. Ingress
+Regeneration does not mutate Pi-hole manual records.
 
 ## Ingress DNS Records and Targets
 
@@ -150,15 +172,20 @@ Directory layout:
   persistent application state.
 - `/srv/services/dns-primary/unbound` stores Unbound configuration mounted at
   `/opt/unbound/etc/unbound`.
+- `/srv/services/dns-secondary/pihole/etc-pihole` stores Pi-hole configuration
+  and persistent application state.
+- `/srv/services/dns-secondary/unbound` stores Unbound configuration mounted at
+  `/opt/unbound/etc/unbound`.
 
 Service Data Directory cleanup and migration are explicit operator actions.
-Redeploying `dns-primary` must not be treated as permission to prune these
+Redeploying a DNS Service must not be treated as permission to prune these
 paths.
 
 ## Operator validation
 
-After provisioning the VM and deploying the Service, validate the resolver from
-a LAN client whose firewall policy is allowed by `DNS-001-ALLOW-INTERNAL-RESOLUTION`.
+After provisioning each VM and deploying each Service, validate each resolver
+from a LAN client whose firewall policy is allowed by
+`DNS-001-ALLOW-INTERNAL-RESOLUTION`.
 
 The first-class live acceptance workflow assumes the durable primary DNS VM
 already exists, deploys the Service, checks the resolver units and port binding
@@ -179,6 +206,7 @@ Confirm external recursive resolution:
 
 ```bash
 dig @10.40.0.11 example.com A
+dig @10.40.0.18 example.com A
 ```
 
 Confirm the current-stage internal DNS path with an expected internal name:
@@ -198,22 +226,27 @@ are active:
 ```bash
 scripts/vm-shell dns-primary-vm -- systemctl --no-pager status fortress-dns-primary-pihole.service
 scripts/vm-shell dns-primary-vm -- systemctl --no-pager status fortress-dns-primary-unbound.service
+scripts/vm-shell dns-secondary-vm -- systemctl --no-pager status fortress-dns-secondary-pihole.service
+scripts/vm-shell dns-secondary-vm -- systemctl --no-pager status fortress-dns-secondary-unbound.service
 ```
 
 Confirm both DNS protocols are listening on the declared resolver address:
 
 ```bash
 scripts/vm-shell dns-primary-vm -- ss -lntup 'sport = :53'
+scripts/vm-shell dns-secondary-vm -- ss -lntup 'sport = :53'
 ```
 
-Expected result: listeners exist for both TCP and UDP port 53 on `10.40.0.11`.
+Expected result: listeners exist for both TCP and UDP port 53 on `10.40.0.11`
+and `10.40.0.18`.
 
 ## Failure checks
 
 If clients cannot resolve through the VM, check in this order:
 
-1. `scripts/vm-up dns-primary-vm` completed and the VM has `10.40.0.11`.
-2. `scripts/service-deploy dns-primary` completed and both systemd units are
+1. `scripts/vm-up <dns-vm>` completed and the VM has its declared resolver
+   address.
+2. `scripts/service-deploy <dns-service>` completed and both systemd units are
    active.
 3. Pi-hole is configured with `FTLCONF_dns_upstreams: unbound`.
 4. Pi-hole is configured with `FTLCONF_dns_listeningMode: all`.

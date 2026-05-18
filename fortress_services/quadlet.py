@@ -34,9 +34,19 @@ class ServiceDataDirectory:
 
 
 @dataclass(frozen=True)
+class ServiceDataFile:
+    path: str
+    content: str = ""
+    uid: int | None = None
+    gid: int | None = None
+    mode: str = "0644"
+
+
+@dataclass(frozen=True)
 class RenderedQuadletService:
     artifacts: tuple[QuadletArtifact, ...]
     service_data_directories: tuple[ServiceDataDirectory, ...] = ()
+    service_data_files: tuple[ServiceDataFile, ...] = ()
 
     @property
     def artifacts_by_filename(self):
@@ -74,6 +84,7 @@ def render_quadlet_service(service, vm, inventory_root=None):
     return RenderedQuadletService(
         artifacts=tuple(artifacts),
         service_data_directories=tuple(_service_data_directories(service)),
+        service_data_files=tuple(_service_data_files(service)),
     )
 
 
@@ -257,6 +268,40 @@ def _service_data_directories(service):
                 )
             )
     return directories
+
+
+def _service_data_files(service):
+    files = []
+    if _needs_unbound_default_include_files(service):
+        owner = service.get("service_data_owner") or {}
+        for filename in ("a-records.conf", "srv-records.conf", "forward-records.conf"):
+            files.append(
+                ServiceDataFile(
+                    path=str(PurePosixPath("/srv/services") / service["name"] / "unbound" / filename),
+                    uid=owner.get("uid"),
+                    gid=owner.get("gid"),
+                )
+            )
+    return files
+
+
+def _needs_unbound_default_include_files(service):
+    dns = service.get("dns") or {}
+    if dns.get("provider") != "pihole":
+        return False
+
+    for container in service.get("deploy", {}).get("containers", []) or []:
+        if container.get("name") != "unbound":
+            continue
+        if container.get("image") != "docker.io/mvance/unbound:1.22.0":
+            continue
+        for volume in container.get("volumes", []) or []:
+            if (
+                volume.get("service_path") == "unbound"
+                and volume.get("container") == "/opt/unbound/etc/unbound"
+            ):
+                return True
+    return False
 
 
 def _quadlet_fragments(service, inventory_root):

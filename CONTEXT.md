@@ -62,6 +62,10 @@ _Avoid_: stack (too Compose-specific), app suite; Service Network.
 A VM-local Podman network shared by one or more Services for private Service-to-Service communication.
 _Avoid_: Service Group, stack network.
 
+**Instrumentation**:
+Declared observability wiring that lets the Observability Service collect VM-level and Service-level telemetry.
+_Avoid_: monitoring config, metrics setup, Service Group.
+
 **Media VM**:
 The Apps VLAN VM that runs media playback, request, catalog, and indexer Services such as Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, and Bazarr.
 _Avoid_: media automation VM, Jellyfin VM.
@@ -671,9 +675,14 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Native Service Environment Secret** belongs to exactly one Native **Service** and is written as an environment variable entry in a root-owned Backend VM file during **Service Deploy**.
 - All **Native Service Environment Secrets** for a Native **Service** live in that Service's **Sibling SOPS File**.
 - The Pi-hole web/API password for `dns-primary` is represented as the `web_api_password` **Service Secret**.
+- The Pi-hole web/API password for `dns-secondary` is represented as the `web_api_password` **Service Secret**.
+- The secondary DNS **Service** has its own **Service Secret** ownership and its own **Sibling SOPS File**.
 - The `dns-primary.fearn.cloud` hostname reaches the Pi-hole web UI through the **Ingress**; DNS resolver traffic to `dns-primary` remains direct TCP/UDP port 53 access to the **DNS VM**.
+- The `dns-secondary.fearn.cloud` hostname reaches the Pi-hole web UI through the **Ingress**; DNS resolver traffic to `dns-secondary` remains direct TCP/UDP port 53 access to the **DNS VM**.
 - **Ingress Regeneration** includes `dns-primary.fearn.cloud` in generated **Ingress** routes and **Ingress DNS Records** when `dns-primary` declares **Ingress**.
 - `dns-primary` is both an **Ingress DNS Target** and an **Ingress**-enabled **Service** for its Pi-hole web UI.
+- `dns-secondary` is both an **Ingress DNS Target** and an **Ingress**-enabled **Service** for its Pi-hole web UI.
+- Primary and secondary DNS **Services** receive the same generated **Ingress DNS Record Set** as peer **Ingress DNS Targets**.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
 - A **NAS Endpoint** is an **Entity**.
 - A **NAS Endpoint** has zero or more **Datasets**.

@@ -159,6 +159,10 @@ def quadlet_deploy_vars(service, vm, inventory_root=None):
             service_data_directory_vars(directory)
             for directory in rendered.service_data_directories
         ],
+        "fortress_service_data_files": [
+            service_data_file_vars(file)
+            for file in rendered.service_data_files
+        ],
         "fortress_service_network_units": network_units,
         "fortress_service_start_units": start_units,
         "fortress_service_stop_units": list(reversed(start_units)),
@@ -275,6 +279,15 @@ def service_data_directory_vars(directory):
         values["uid"] = directory.uid
     if directory.gid is not None:
         values["gid"] = directory.gid
+    return values
+
+
+def service_data_file_vars(file):
+    values = {"path": file.path, "content": file.content, "mode": file.mode}
+    if file.uid is not None:
+        values["uid"] = file.uid
+    if file.gid is not None:
+        values["gid"] = file.gid
     return values
 
 

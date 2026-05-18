@@ -49,6 +49,17 @@
       loop: "{{ fortress_service_data_directories | default([]) }}"
       when: fortress_service_deploy_type == "quadlet"
 
+    - name: Ensure Service Data Files exist
+      ansible.builtin.copy:
+        dest: "{{ item.path }}"
+        content: "{{ item.content }}"
+        force: false
+        owner: "{{ item.uid | default(omit) }}"
+        group: "{{ item.gid | default(omit) }}"
+        mode: "{{ item.mode }}"
+      loop: "{{ fortress_service_data_files | default([]) }}"
+      when: fortress_service_deploy_type == "quadlet"
+
     - name: Ensure Quadlet system directory exists
       ansible.builtin.file:
         path: /etc/containers/systemd

@@ -1,0 +1,52 @@
+name: dns-secondary
+service_group: dns-secondary
+service_network: dns-secondary
+service_data_owner:
+  uid: 1000
+  gid: 1000
+backend:
+  vm: dns-secondary-vm
+  port: 8080
+hostname: dns-secondary.fearn.cloud
+ingress:
+  enabled: true
+dns:
+  provider: pihole
+  ingress_records:
+    enabled: true
+deploy:
+  type: quadlet
+  containers:
+    - name: pihole
+      image: docker.io/pihole/pihole:2025.05.0
+      depends_on: [unbound]
+      published_ports:
+        - bind: 10.40.0.18
+          host: 53
+          container: 53
+          protocol: tcp_udp
+        - bind: 0.0.0.0
+          host: 8080
+          container: 80
+          ingress: true
+      env:
+        TZ: UTC
+        FTLCONF_dns_upstreams: unbound
+        FTLCONF_dns_listeningMode: all
+      secrets:
+        - secret: secrets.web_api_password
+          env: WEBPASSWORD_FILE
+          env_value: secret_name
+      volumes:
+        - service_path: pihole/etc-pihole
+          container: /etc/pihole
+          access: read_write
+        - service_path: pihole/etc-dnsmasq.d
+          container: /etc/dnsmasq.d
+          access: read_write
+    - name: unbound
+      image: docker.io/mvance/unbound:1.22.0
+      volumes:
+        - service_path: unbound
+          container: /opt/unbound/etc/unbound
+          access: read_write

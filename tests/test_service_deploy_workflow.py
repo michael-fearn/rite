@@ -473,6 +473,20 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         self.assertIn("podman secret create", playbook)
         self.assertIn("stdin_add_newline: false", playbook)
 
+    def test_service_deploy_playbook_creates_service_data_files_before_starting_containers(self):
+        playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
+
+        self.assertLess(
+            playbook.index("name: Ensure Service Data Directories exist"),
+            playbook.index("name: Ensure Service Data Files exist"),
+        )
+        self.assertLess(
+            playbook.index("name: Ensure Service Data Files exist"),
+            playbook.index("name: Start Service containers in dependency order"),
+        )
+        self.assertIn("force: false", playbook)
+        self.assertIn("fortress_service_data_files", playbook)
+
     def test_service_deploy_passes_rendered_artifacts_and_restart_order_to_playbook(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -541,21 +555,54 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
 
     def test_service_deploy_renders_pihole_dnsmasq_d_compatibility_for_ingress_dns_targets(self):
         model = load_inventory_tree(REPO_ROOT)
-        service = model.services["dns-primary"]
-        vm = model.vms["dns-primary-vm"]
+        cases = [
+            ("dns-primary", "dns-primary-vm"),
+            ("dns-secondary", "dns-secondary-vm"),
+        ]
 
-        deploy_vars = quadlet_deploy_vars(service, vm, inventory_root=REPO_ROOT / "inventory")
-        pihole_artifact = next(
-            artifact
-            for artifact in deploy_vars["fortress_quadlet_artifacts"]
-            if artifact["filename"] == "fortress-dns-primary-pihole.container"
-        )
+        for service_name, vm_name in cases:
+            with self.subTest(service=service_name):
+                service = model.services[service_name]
+                vm = model.vms[vm_name]
 
-        self.assertIn("Environment=FTLCONF_misc_etc_dnsmasq_d=true\n", pihole_artifact["content"])
-        self.assertIn(
-            "Volume=/srv/services/dns-primary/pihole/etc-dnsmasq.d:/etc/dnsmasq.d:rw\n",
-            pihole_artifact["content"],
-        )
+                deploy_vars = quadlet_deploy_vars(service, vm, inventory_root=REPO_ROOT / "inventory")
+                pihole_artifact = next(
+                    artifact
+                    for artifact in deploy_vars["fortress_quadlet_artifacts"]
+                    if artifact["filename"] == f"fortress-{service_name}-pihole.container"
+                )
+
+                self.assertIn("Environment=FTLCONF_misc_etc_dnsmasq_d=true\n", pihole_artifact["content"])
+                self.assertIn(
+                    f"Volume=/srv/services/{service_name}/pihole/etc-dnsmasq.d:/etc/dnsmasq.d:rw\n",
+                    pihole_artifact["content"],
+                )
+                self.assertEqual(
+                    [
+                        {
+                            "path": f"/srv/services/{service_name}/unbound/a-records.conf",
+                            "content": "",
+                            "mode": "0644",
+                            "uid": 1000,
+                            "gid": 1000,
+                        },
+                        {
+                            "path": f"/srv/services/{service_name}/unbound/srv-records.conf",
+                            "content": "",
+                            "mode": "0644",
+                            "uid": 1000,
+                            "gid": 1000,
+                        },
+                        {
+                            "path": f"/srv/services/{service_name}/unbound/forward-records.conf",
+                            "content": "",
+                            "mode": "0644",
+                            "uid": 1000,
+                            "gid": 1000,
+                        },
+                    ],
+                    deploy_vars["fortress_service_data_files"],
+                )
 
     def test_internal_ingress_service_deploy_scaffolding_imports_generated_routes(self):
         caddyfile = (REPO_ROOT / "inventory" / "services" / "internal-ingress.native.d" / "Caddyfile.j2").read_text()

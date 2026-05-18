@@ -1,0 +1,23 @@
+vmid: 1008
+description: Secondary Infrastructure VLAN DNS resolver
+placement:
+  host: molly
+source:
+  template: debian-13-base
+hardware:
+  cores: 1
+  memory: 2048
+  disks:
+    - storage: local-lvm
+      size: 8G
+network:
+  interfaces:
+    - bridge: vmbr0
+      vlan: 40
+      address: 10.40.0.18/24
+      gateway: 10.40.0.1
+cloud_init:
+  hostname: dns-secondary-vm
+backup:
+  enabled: true
+ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDgIHRiJRviq2mO+LFTBP2v1N8vji/tC61jEytibabbe fortress-vm-prepare:dns-secondary-vm:2026-05-18T02:58:48Z
