@@ -70,6 +70,14 @@ _Avoid_: monitoring config, metrics setup, Service Group.
 An application-specific endpoint or probe declared by a Service for collection by the Observability Service.
 _Avoid_: scrape config, Prometheus job.
 
+**Observability View**:
+A generated operator-facing dashboard or panel set that presents telemetry collected from declared Instrumentation.
+_Avoid_: dashboard config, Grafana JSON, monitoring page.
+
+**Observability View Profile**:
+A named reusable view shape that Rite can generate from compatible Instrumentation.
+_Avoid_: dashboard template, panel preset, Grafana model.
+
 **Media VM**:
 The Apps VLAN VM that runs media playback, request, catalog, and indexer Services such as Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, and Bazarr.
 _Avoid_: media automation VM, Jellyfin VM.
@@ -552,6 +560,21 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - Service Launch and Service Group Launch refresh the **Observability VM** when launched **Services** change **Instrumentation**.
 - The **Observability VM** consumes **Instrumentation** declarations from observed **VMs** and **Services**.
 - The Observability Service's generated collector configuration is an **Application Configuration Artifact**.
+- An **Observability View** is derived from telemetry collected through **Instrumentation**.
+- Enabled VM-level **Instrumentation** causes the instrumented **VM** to appear in generated baseline **Observability Views**.
+- Application-specific Service **Observability Views** require explicit application-specific Service **Instrumentation**.
+- Observed **Entities** own the telemetry facts that generated **Observability Views** use.
+- The Observability Service owns the generated **Application Configuration Artifacts** for **Observability Views**.
+- An **Observability View Profile** names a reusable **Observability View** shape without exposing Grafana-specific configuration in observed **Entity** declarations.
+- First-pass **Observability View Profiles** are built into Rite and referenced by name from **Instrumentation** declarations only where explicit view intent is needed.
+- A Service-level **Observability View Profile** applies to the Service-level **Instrumentation** declaration as a whole, not to one **Telemetry Target**.
+- A first-pass Service-level **Instrumentation** declaration may request at most one application-specific **Observability View** for that **Service**.
+- Generated **Observability Views** are declaratively reconciled from current **Instrumentation** declarations.
+- Operator edits to generated **Observability Views** are not preserved by Rite.
+- Instrumentation Convergence refreshes generated **Observability Views** along with the Observability Service's generated collector configuration.
+- First-pass generated **Observability Views** live in one Rite-owned generated Grafana folder.
+- Generated **Observability View** identity is derived from the observed **Entity** identity and view kind, not from the display title.
+- First-pass **Observability View Profiles** are `vm_baseline` and `prometheus_generic`.
 - Media request and playback Services may share a **Service Group** when they have the same storage access and trust boundary.
 - Download clients must run on a separate **VM** from media request and playback Services.
 - The **Media VM** and **Download VM** both consume the media Dataset, while individual **Services** narrow their visible paths through **Share-backed Volumes**.
@@ -859,6 +882,7 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Service Group Update**: Deferred. **Service Update** updates only one named **Service**; coordinated **Service Group** maintenance will be modeled when a real group-level update need appears.
 - **Service health checks**: Deferred. **Service Update** proves systemd unit activation; application-level health semantics require an explicit future Service health contract.
 - **VM-level Instrumentation collector selection**: Deferred. First-pass enabled VM-level **Instrumentation** applies one baseline collector set; per-VM collector profiles belong in a later extension of the VM-level **Instrumentation** declaration and would be applied to existing **VMs** through Instrumentation Convergence.
+- **Additional Observability View Profiles**: Deferred. First-pass generated **Observability Views** support `vm_baseline` and `prometheus_generic`; standalone `http_probe`, generic Service runtime, and application-specific profiles such as Postgres, Caddy, Immich, or Jellyfin require later explicit need.
 - **Fleet Update**: Deferred. Fleet-wide maintenance ordering, batching, and failure isolation will be modeled only after the individual **Host Update**, **Template Update**, **VM Update**, and **Service Update** workflows are proven.
 - **Adopted Share**: Deferred. Existing manual Shares are not adopted by fortress; overlapping unmanaged Shares block **NAS Reconcile** until the Operator removes or otherwise resolves them.
 - **Multi-interface NAS clients**: Deferred. Mount-bearing VMs currently require an unambiguous static IP address for NFS Share client access.

@@ -1,0 +1,3 @@
+# Grafana observability views use file provisioning
+
+Rite generates Grafana Observability Views through Grafana file provisioning rather than the Grafana HTTP API. This matches the existing generated-file model for the Observability Service, avoids introducing Grafana admin API credentials into Rite, and keeps generated views rebuildable from Inventory-derived Instrumentation and Rite-owned profiles. The rejected alternative was API-driven dashboard reconciliation, which would support more interactive mutation but would add credential handling and a second reconciliation style for generated Observability artifacts.
