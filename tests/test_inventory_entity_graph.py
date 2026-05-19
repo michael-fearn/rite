@@ -13,6 +13,7 @@ from fortress_inventory.entity_graph import (
     HostBridgeFact,
     InventoryEntityGraph,
     InventoryEntityGraphError,
+    ObservabilityViewIntent,
     ServiceGroupLaunchIntent,
     ServiceLaunchIntent,
     ServiceShareBackedVolumeFact,
@@ -297,6 +298,143 @@ class InventoryEntityGraphTests(unittest.TestCase):
                 ),
             ),
             graph.service_telemetry_target_facts(),
+        )
+
+    def test_exposes_vm_baseline_observability_view_intent_for_instrumented_vms(self):
+        model = inventory_model(
+            vms={
+                "media01": {
+                    "network": {"interfaces": [{"address": "10.0.10.101/24"}]},
+                },
+                "disabled01": {
+                    "instrumentation": {"enabled": False},
+                    "network": {"interfaces": [{"address": "10.0.10.102/24"}]},
+                },
+                "template-verify": {
+                    "lifecycle": {"kind": "operational"},
+                    "network": {"interfaces": [{"address": "10.0.10.231/24"}]},
+                },
+            },
+        )
+
+        graph = InventoryEntityGraph(model)
+
+        self.assertEqual(
+            (
+                ObservabilityViewIntent(
+                    view_id="vm:media01:vm_baseline",
+                    entity_kind="vm",
+                    entity_name="media01",
+                    view_kind="vm_baseline",
+                    profile=None,
+                ),
+            ),
+            graph.observability_view_intents(),
+        )
+
+    def test_exposes_service_observability_view_intent_for_requested_profiles(self):
+        model = inventory_model(
+            vms={
+                "media01": {
+                    "network": {"interfaces": [{"address": "10.0.10.101/24"}]},
+                },
+            },
+            services={
+                "immich": {
+                    "backend": {"vm": "media01", "port": 2283},
+                    "instrumentation": {
+                        "observability_views": [{"profile": "prometheus_generic"}],
+                    },
+                },
+                "paperless": {
+                    "backend": {"vm": "media01", "port": 8000},
+                    "instrumentation": {},
+                },
+            },
+        )
+
+        graph = InventoryEntityGraph(model)
+
+        self.assertIn(
+            ObservabilityViewIntent(
+                view_id="service:immich:prometheus_generic",
+                entity_kind="service",
+                entity_name="immich",
+                view_kind="service_profile",
+                profile="prometheus_generic",
+            ),
+            graph.observability_view_intents(),
+        )
+        self.assertNotIn(
+            ObservabilityViewIntent(
+                view_id="service:paperless:prometheus_generic",
+                entity_kind="service",
+                entity_name="paperless",
+                view_kind="service_profile",
+                profile="prometheus_generic",
+            ),
+            graph.observability_view_intents(),
+        )
+
+    def test_observability_view_identity_uses_entity_identity_and_view_kind(self):
+        model = inventory_model(
+            vms={
+                "media01": {
+                    "display_name": "Media Server",
+                    "network": {"interfaces": [{"address": "10.0.10.101/24"}]},
+                },
+            },
+            services={
+                "immich": {
+                    "display_name": "Family Photos",
+                    "backend": {"vm": "media01", "port": 2283},
+                    "instrumentation": {
+                        "observability_views": [{"profile": "prometheus_generic"}],
+                    },
+                },
+            },
+        )
+
+        graph = InventoryEntityGraph(model)
+
+        self.assertEqual(
+            ("vm:media01:vm_baseline", "service:immich:prometheus_generic"),
+            tuple(intent.view_id for intent in graph.observability_view_intents()),
+        )
+
+    def test_observability_view_intent_excludes_vms_from_generation_context(self):
+        model = inventory_model(
+            vms={
+                "media01": {
+                    "network": {"interfaces": [{"address": "10.0.10.101/24"}]},
+                },
+                "stale-vm": {
+                    "network": {"interfaces": [{"address": "10.0.10.199/24"}]},
+                },
+            },
+            services={
+                "immich": {
+                    "backend": {"vm": "stale-vm", "port": 2283},
+                    "instrumentation": {
+                        "observability_views": [{"profile": "prometheus_generic"}],
+                    },
+                },
+            },
+        )
+
+        graph = InventoryEntityGraph(model)
+
+        self.assertEqual(
+            (
+                ObservabilityViewIntent(
+                    view_id="vm:media01:vm_baseline",
+                    entity_kind="vm",
+                    entity_name="media01",
+                    view_kind="vm_baseline",
+                    profile=None,
+                ),
+            ),
+            graph.observability_view_intents(excluded_vm_names={"stale-vm"}),
         )
 
     def test_exposes_derived_nfs_share_planning_inputs(self):

@@ -104,6 +104,76 @@ class InstrumentationConvergenceWorkflowTests(unittest.TestCase):
                 calls_log.read_text().splitlines(),
             )
 
+    def test_instrumentation_converge_refreshes_current_generated_observability_view_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._workflow_fixture(tmp)
+            self._write_service_observability_view_request(root)
+            env = self._workflow_env(root, calls_log)
+            env["FORTRESS_LOG_OBSERVABILITY_ARTIFACTS"] = "1"
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "instrumentation-converge")],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "generated-dashboard /srv/services/observability/grafana-dashboards/generated/service-immich-prometheus_generic.json",
+                calls_log.read_text().splitlines(),
+            )
+
+            (root / "inventory" / "services" / "immich.yaml").write_text(
+                (root / "inventory" / "services" / "immich.yaml")
+                .read_text()
+                .replace("  observability_views:\n    - profile: prometheus_generic\n", "")
+            )
+            calls_log.unlink()
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "instrumentation-converge")],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(
+                "generated-dashboard /srv/services/observability/grafana-dashboards/generated/service-immich-prometheus_generic.json",
+                calls_log.read_text().splitlines(),
+            )
+
+    def test_instrumentation_converge_omits_opted_out_vm_observability_view_on_refresh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._workflow_fixture(tmp)
+            (root / "inventory" / "vms" / "app-vm.yaml").write_text(
+                "vmid: 101\n"
+                "instrumentation:\n"
+                "  enabled: false\n"
+            )
+            env = self._workflow_env(root, calls_log)
+            env["FORTRESS_LOG_OBSERVABILITY_ARTIFACTS"] = "1"
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "instrumentation-converge")],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(
+                "generated-dashboard /srv/services/observability/grafana-dashboards/generated/vm-app-vm-vm_baseline.json",
+                calls_log.read_text().splitlines(),
+            )
+
     def test_instrumentation_converge_stops_and_reports_the_failed_phase(self):
         scenarios = {
             "vm-configure app-vm": (
@@ -179,6 +249,25 @@ class InstrumentationConvergenceWorkflowTests(unittest.TestCase):
                 "if [ \"$#\" -gt 0 ]; then printf ' %s' \"$*\" >> \"$CALLS_LOG\"; fi\n"
                 "if [ \"$name\" = service-update ] && [ -n \"$FORTRESS_OBSERVABILITY_EXCLUDED_VMS\" ]; then printf ' excluded=%s' \"$FORTRESS_OBSERVABILITY_EXCLUDED_VMS\" >> \"$CALLS_LOG\"; fi\n"
                 "printf '\\n' >> \"$CALLS_LOG\"\n"
+                "if [ \"$name\" = service-update ] && [ \"$FORTRESS_LOG_OBSERVABILITY_ARTIFACTS\" = 1 ]; then\n"
+                f"  PYTHONPATH={REPO_ROOT!s} python3 - \"$FORTRESS_ROOT\" \"$CALLS_LOG\" <<'PY'\n"
+                "import json\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "from fortress_inventory.model import load_inventory_tree\n"
+                "from fortress_services.deploy import quadlet_deploy_vars\n"
+                "root = Path(sys.argv[1])\n"
+                "calls_log = Path(sys.argv[2])\n"
+                "model = load_inventory_tree(root)\n"
+                "service = model.services['observability']\n"
+                "vm = model.vms[service['backend']['vm']]\n"
+                "deploy_vars = quadlet_deploy_vars(service, vm, inventory_root=root / 'inventory', model=model)\n"
+                "with calls_log.open('a') as handle:\n"
+                "    for file in deploy_vars['fortress_service_data_files']:\n"
+                "        if file['path'].startswith('/srv/services/observability/grafana-dashboards/generated/'):\n"
+                "            handle.write(f\"generated-dashboard {file['path']}\\n\")\n"
+                "PY\n"
+                "fi\n"
                 "if [ \"$FORTRESS_FAIL_CALL\" = \"$call\" ]; then exit 42; fi\n"
                 "if [ \"$FORTRESS_FAIL_PHASE\" = \"$name\" ]; then exit 42; fi\n"
             )
@@ -200,6 +289,30 @@ class InstrumentationConvergenceWorkflowTests(unittest.TestCase):
         env["FORTRESS_ROOT"] = str(root)
         env["CALLS_LOG"] = str(calls_log)
         return env
+
+    def _write_service_observability_view_request(self, root):
+        (root / "inventory" / "services" / "immich.yaml").write_text(
+            "name: immich\n"
+            "backend:\n"
+            "  vm: app-vm\n"
+            "  port: 2283\n"
+            "instrumentation:\n"
+            "  telemetry_targets:\n"
+            "    - name: metrics\n"
+            "      type: prometheus_metrics\n"
+            "      published_port: 2283\n"
+            "  observability_views:\n"
+            "    - profile: prometheus_generic\n"
+            "deploy:\n"
+            "  type: quadlet\n"
+            "  containers:\n"
+            "    - name: server\n"
+            "      image: example.invalid/immich:1\n"
+            "      published_ports:\n"
+            "        - container: 2283\n"
+            "          host: 2283\n"
+            "          bind: 0.0.0.0\n"
+        )
 
 
 if __name__ == "__main__":

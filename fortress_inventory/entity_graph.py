@@ -82,6 +82,15 @@ class ServiceTelemetryTargetFact:
 
 
 @dataclass(frozen=True)
+class ObservabilityViewIntent:
+    view_id: str
+    entity_kind: str
+    entity_name: str
+    view_kind: str
+    profile: str | None
+
+
+@dataclass(frozen=True)
 class ServiceLaunchIntent:
     service_name: str
     backend_vm_name: str
@@ -231,6 +240,41 @@ class InventoryEntityGraph:
                 path=target.path,
             )
             for target in intent.telemetry_targets
+        )
+
+    def observability_view_intents(self, excluded_vm_names=()):
+        return self.vm_observability_view_intents(
+            excluded_vm_names=excluded_vm_names
+        ) + self.service_observability_view_intents(excluded_vm_names=excluded_vm_names)
+
+    def vm_observability_view_intents(self, excluded_vm_names=()):
+        excluded_vm_names = frozenset(excluded_vm_names)
+        return tuple(
+            ObservabilityViewIntent(
+                view_id=f"vm:{vm.vm_name}:vm_baseline",
+                entity_kind="vm",
+                entity_name=vm.vm_name,
+                view_kind="vm_baseline",
+                profile=None,
+            )
+            for vm in self.instrumented_vm_facts()
+            if vm.vm_name not in excluded_vm_names
+        )
+
+    def service_observability_view_intents(self, excluded_vm_names=()):
+        excluded_vm_names = frozenset(excluded_vm_names)
+        return tuple(
+            ObservabilityViewIntent(
+                view_id=f"service:{service_name}:{request['profile']}",
+                entity_kind="service",
+                entity_name=service_name,
+                view_kind="service_profile",
+                profile=request["profile"],
+            )
+            for service_name, service in sorted(self._model.services.items())
+            for request in (service.get("instrumentation") or {}).get("observability_views", []) or []
+            if isinstance(request, dict) and request.get("profile")
+            if self.service_backend_vm_name(service_name) not in excluded_vm_names
         )
 
     def service_launch_intent(self, service_name):

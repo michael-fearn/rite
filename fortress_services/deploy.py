@@ -4,8 +4,11 @@ from copy import deepcopy
 from pathlib import Path
 from pathlib import PurePosixPath
 
-from fortress_services.observability_config import observability_service_data_files
-from fortress_services.quadlet import render_quadlet_service
+from fortress_services.observability_config import (
+    GRAFANA_GENERATED_DASHBOARD_DIR,
+    observability_service_data_files,
+)
+from fortress_services.quadlet import ServiceDataDirectory, render_quadlet_service
 
 
 REQUIRED_SERVICE_SECRET_FIELDS = ("created", "version", "value")
@@ -150,8 +153,15 @@ def quadlet_deploy_vars(service, vm, inventory_root=None, model=None):
     service = _service_with_deploy_capability_setup(service)
     rendered = render_quadlet_service(service, vm, inventory_root=inventory_root)
     service_data_files = list(rendered.service_data_files)
+    service_data_directories = list(rendered.service_data_directories)
+    service_data_reconcile_directories = []
     if service.get("name") == "observability" and model is not None:
         service_data_files.extend(observability_service_data_files(model))
+        service_data_directories = _with_service_data_file_parent_directories(
+            service_data_directories,
+            service_data_files,
+        )
+        service_data_reconcile_directories.append(GRAFANA_GENERATED_DASHBOARD_DIR)
     start_units = service_start_units(service)
     network_units = quadlet_network_units(rendered.artifacts)
     return {
@@ -161,12 +171,13 @@ def quadlet_deploy_vars(service, vm, inventory_root=None, model=None):
         ],
         "fortress_service_data_directories": [
             service_data_directory_vars(directory)
-            for directory in rendered.service_data_directories
+            for directory in service_data_directories
         ],
         "fortress_service_data_files": [
             service_data_file_vars(file)
             for file in service_data_files
         ],
+        "fortress_service_data_reconcile_directories": service_data_reconcile_directories,
         "fortress_service_network_units": network_units,
         "fortress_service_start_units": start_units,
         "fortress_service_stop_units": list(reversed(start_units)),
@@ -181,6 +192,38 @@ def quadlet_deploy_vars(service, vm, inventory_root=None, model=None):
         ],
         "fortress_service_secret_prefix": f"fortress_{service['name']}_",
     }
+
+
+def _with_service_data_file_parent_directories(directories, files):
+    directories = list(directories)
+    known_paths = {directory.path for directory in directories}
+    for file in files:
+        parent = str(PurePosixPath(file.path).parent)
+        if parent in known_paths:
+            continue
+        if not _has_service_data_directory_ancestor(parent, directories):
+            continue
+        known_paths.add(parent)
+        directories.append(
+            ServiceDataDirectory(
+                path=parent,
+                uid=file.uid,
+                gid=file.gid,
+            )
+        )
+    return directories
+
+
+def _has_service_data_directory_ancestor(path, directories):
+    candidate = PurePosixPath(path)
+    for directory in directories:
+        ancestor = PurePosixPath(directory.path)
+        try:
+            candidate.relative_to(ancestor)
+        except ValueError:
+            continue
+        return True
+    return False
 
 
 def _service_with_deploy_capability_setup(service):

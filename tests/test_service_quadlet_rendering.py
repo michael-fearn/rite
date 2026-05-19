@@ -636,6 +636,37 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
             [directory.path for directory in rendered.service_data_directories],
         )
 
+    def test_observability_mounts_generated_grafana_provisioning_and_dashboards(self):
+        model = load_inventory_tree(REPO_ROOT)
+        rendered = render_quadlet_service(
+            model.services["observability"],
+            model.vms["observability-vm"],
+            inventory_root=REPO_ROOT / "inventory",
+        )
+
+        grafana = rendered.artifacts_by_filename["fortress-observability-grafana.container"]
+        self.assertIn(
+            "Volume=/srv/services/observability/grafana-provisioning:"
+            "/etc/grafana/provisioning:ro\n",
+            grafana.content,
+        )
+        self.assertIn(
+            "Volume=/srv/services/observability/grafana-dashboards/generated:"
+            "/var/lib/grafana/dashboards/fortress-generated:ro\n",
+            grafana.content,
+        )
+        directories = {
+            directory.path: directory
+            for directory in rendered.service_data_directories
+        }
+        for path in (
+            "/srv/services/observability/grafana-provisioning",
+            "/srv/services/observability/grafana-dashboards/generated",
+        ):
+            self.assertIn(path, directories)
+            self.assertEqual(1000, directories[path].uid)
+            self.assertEqual(1000, directories[path].gid)
+
     def test_quadlet_fragment_rejects_unknown_fragment_filename(self):
         service = {
             "name": "immich",

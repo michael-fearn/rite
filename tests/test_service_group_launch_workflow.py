@@ -111,6 +111,35 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
                 list(observability_refresh.command),
             )
 
+    def test_service_group_launch_plan_refreshes_observability_when_service_requests_generated_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            self._write_service(
+                root,
+                "sonarr",
+                "media01",
+                deploy_type="quadlet",
+                ingress_enabled=False,
+                instrumentation_enabled=True,
+                observability_view_enabled=True,
+            )
+
+            plan = build_service_group_launch_plan(root, "media")
+
+            self.assertEqual(
+                [
+                    "vm-lifecycle",
+                    "service-deploy:prowlarr",
+                    "service-deploy:sonarr",
+                    "observability-refresh",
+                ],
+                [step.id for step in plan.steps],
+            )
+            self.assertEqual(
+                [str(root / "scripts" / "service-update"), "observability", "--auto-confirm"],
+                list(plan.steps[-1].command),
+            )
+
     def test_observability_service_group_launch_plan_uses_observability_vm_and_service(self):
         plan = build_service_group_launch_plan(REPO_ROOT, "observability", auto_confirm=True)
 
@@ -326,14 +355,22 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
         deploy_type,
         ingress_enabled,
         instrumentation_enabled=False,
+        observability_view_enabled=False,
     ):
         ingress = "true" if ingress_enabled else "false"
+        observability_view = (
+            "  observability_views:\n"
+            "    - profile: prometheus_generic\n"
+            if observability_view_enabled
+            else ""
+        )
         instrumentation = (
             "instrumentation:\n"
             "  telemetry_targets:\n"
             "    - name: metrics\n"
             "      type: prometheus_metrics\n"
             "      published_port: 8080\n"
+            f"{observability_view}"
             if instrumentation_enabled
             else ""
         )

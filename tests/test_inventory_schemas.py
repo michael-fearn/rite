@@ -449,6 +449,89 @@ class InventorySchemaTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_service_schema_accepts_service_observability_view_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "  observability_views:\n"
+                "    - profile: prometheus_generic\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      published_ports:\n"
+                "        - container: 2283\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_service_schema_rejects_unknown_service_observability_view_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "  observability_views:\n"
+                "    - profile: postgres\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("prometheus_generic", result.stdout + result.stderr)
+
+    def test_service_schema_rejects_multiple_service_observability_view_requests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "  observability_views:\n"
+                "    - profile: prometheus_generic\n"
+                "    - profile: prometheus_generic\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("observability_views", result.stdout + result.stderr)
+
     def test_service_schema_rejects_telemetry_target_config_beyond_scheme_and_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             service_yaml = Path(tmp) / "immich.yaml"

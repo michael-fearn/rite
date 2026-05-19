@@ -51,6 +51,12 @@ deploy:
         - service_path: grafana
           container: /var/lib/grafana
           access: read_write
+        - service_path: grafana-provisioning
+          container: /etc/grafana/provisioning
+          access: read_only
+        - service_path: grafana-dashboards/generated
+          container: /var/lib/grafana/dashboards/fortress-generated
+          access: read_only
     - name: loki
       image: docker.io/grafana/loki:3.5.0
       published_ports:

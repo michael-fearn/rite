@@ -49,6 +49,21 @@
       loop: "{{ fortress_service_data_directories | default([]) }}"
       when: fortress_service_deploy_type == "quadlet"
 
+    - name: Find stale generated Service Data Files
+      ansible.builtin.find:
+        paths: "{{ item }}"
+        file_type: file
+      loop: "{{ fortress_service_data_reconcile_directories | default([]) }}"
+      register: fortress_stale_generated_service_data
+      when: fortress_service_deploy_type == "quadlet"
+
+    - name: Prune stale generated Service Data Files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ fortress_stale_generated_service_data.results | default([]) | map(attribute='files') | flatten }}"
+      when: fortress_service_deploy_type == "quadlet"
+
     - name: Ensure Service Data Files exist
       ansible.builtin.copy:
         dest: "{{ item.path }}"

@@ -17,6 +17,7 @@ TELEMETRY_TARGET_RUNTIME_DIAGNOSTICS = {
     "missing_telemetry_target_published_port",
     "unreachable_telemetry_target_published_port",
 }
+SERVICE_OBSERVABILITY_VIEW_PROFILES = {"prometheus_generic"}
 
 
 def validate_service_ingress_contract(model):
@@ -80,10 +81,55 @@ def validate_quadlet_services(model):
     errors = []
     errors.extend(_validate_published_ports(model))
     errors.extend(_validate_service_telemetry_targets(model))
+    errors.extend(validate_service_observability_view_requests(model))
     errors.extend(_validate_service_images(model))
     errors.extend(_validate_service_networks(model))
     errors.extend(_validate_container_dependencies(model))
     errors.extend(_validate_service_secrets(model))
+    return errors
+
+
+def validate_service_observability_view_requests(model):
+    errors = []
+    for service_name, service in model.services.items():
+        instrumentation = service.get("instrumentation") or {}
+        requests = instrumentation.get("observability_views") or []
+        if len(requests) > 1:
+            errors.append(
+                ValidationError(
+                    "multiple_service_observability_view_requests",
+                    f"inventory/services/{service_name}.yaml.instrumentation.observability_views",
+                    f"Service {service_name} requests more than one Service-level Observability View",
+                )
+            )
+        telemetry_targets = instrumentation.get("telemetry_targets") or []
+        for request_index, request in enumerate(requests):
+            profile = request.get("profile") if isinstance(request, dict) else None
+            path = f"inventory/services/{service_name}.yaml.instrumentation.observability_views[{request_index}].profile"
+            if profile not in SERVICE_OBSERVABILITY_VIEW_PROFILES:
+                errors.append(
+                    ValidationError(
+                        "unsupported_service_observability_view_profile",
+                        path,
+                        f"Service {service_name} requests unsupported Observability View Profile {profile}",
+                    )
+                )
+                continue
+            if profile == "prometheus_generic" and not any(
+                target.get("type") == "prometheus_metrics"
+                for target in telemetry_targets
+                if isinstance(target, dict)
+            ):
+                errors.append(
+                    ValidationError(
+                        "incompatible_service_observability_view_profile",
+                        path,
+                        (
+                            f"Service {service_name} requests prometheus_generic Observability View Profile "
+                            "without a prometheus_metrics Telemetry Target"
+                        ),
+                    )
+                )
     return errors
 
 

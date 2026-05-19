@@ -68,6 +68,23 @@ class InstrumentationRunbookTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, content)
 
+    def test_runbook_documents_generated_observability_views(self):
+        content = (REPO_ROOT / "runbooks" / "instrumentation.md").read_text()
+
+        for phrase in [
+            "Generated Observability Views are derived from Instrumentation",
+            "refreshed through `just instrumentation-converge`",
+            "single Rite-owned generated Grafana folder",
+            "Operator edits to generated views are not preserved",
+            "automatic `vm_baseline` view for each included ordinary VM",
+            "explicit Service-level `prometheus_generic` view",
+            "applies to the Service Instrumentation declaration as a whole, not to one Telemetry Target",
+            "uses Grafana file provisioning rather than the Grafana HTTP API",
+            "docs/adr/0033-grafana-observability-views-use-file-provisioning.md",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, content)
+
 
 if __name__ == "__main__":
     unittest.main()

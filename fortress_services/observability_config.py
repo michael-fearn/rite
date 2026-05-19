@@ -1,3 +1,4 @@
+import json
 import os
 
 from fortress_inventory.entity_graph import InventoryEntityGraph
@@ -7,6 +8,13 @@ from fortress_services.quadlet import ServiceDataFile
 NODE_EXPORTER_PORT = 9100
 PROMETHEUS_CONFIG_PATH = "/srv/services/observability/prometheus-config/prometheus.yml"
 GENERATED_ENDPOINTS_PATH = "/srv/services/observability/generated-endpoints.yml"
+GRAFANA_DASHBOARD_PROVIDER_PATH = (
+    "/srv/services/observability/grafana-provisioning/dashboards/fortress-generated.yml"
+)
+GRAFANA_GENERATED_DASHBOARD_DIR = "/srv/services/observability/grafana-dashboards/generated"
+GRAFANA_CONTAINER_GENERATED_DASHBOARD_DIR = "/var/lib/grafana/dashboards/fortress-generated"
+GRAFANA_GENERATED_FOLDER_TITLE = "Rite Generated Observability"
+GRAFANA_GENERATED_FOLDER_UID = "fortress-generated-observability"
 
 
 def observability_service_data_files(model):
@@ -84,6 +92,32 @@ def observability_service_data_files(model):
     observability_vm_name = (observability_service.get("backend") or {}).get("vm")
     observability_vm_address = graph.vm_static_ipv4_address(observability_vm_name)
     loki_port = _published_port_for_container(observability_service, "loki", 3100)
+    grafana_provider = {
+        "apiVersion": 1,
+        "providers": [
+            {
+                "name": "fortress-generated-observability-views",
+                "orgId": 1,
+                "folder": GRAFANA_GENERATED_FOLDER_TITLE,
+                "folderUid": GRAFANA_GENERATED_FOLDER_UID,
+                "type": "file",
+                "disableDeletion": False,
+                "editable": False,
+                "allowUiUpdates": False,
+                "options": {"path": GRAFANA_CONTAINER_GENERATED_DASHBOARD_DIR},
+            }
+        ],
+    }
+    grafana_dashboard_files = tuple(
+        ServiceDataFile(
+            path=f"{GRAFANA_GENERATED_DASHBOARD_DIR}/{_grafana_dashboard_filename(intent)}",
+            content=_grafana_dashboard_json(intent, telemetry_targets),
+            uid=owner.get("uid"),
+            gid=owner.get("gid"),
+            force=True,
+        )
+        for intent in graph.observability_view_intents(excluded_vm_names=excluded_vm_names)
+    )
     return (
         ServiceDataFile(
             path=PROMETHEUS_CONFIG_PATH,
@@ -107,7 +141,14 @@ def observability_service_data_files(model):
             gid=owner.get("gid"),
             force=True,
         ),
-    )
+        ServiceDataFile(
+            path=GRAFANA_DASHBOARD_PROVIDER_PATH,
+            content=_dump_yaml(grafana_provider),
+            uid=owner.get("uid"),
+            gid=owner.get("gid"),
+            force=True,
+        ),
+    ) + grafana_dashboard_files
 
 
 def _published_port_for_container(service, container_name, container_port):
@@ -126,6 +167,206 @@ def _excluded_vm_names():
         for vm_name in os.environ.get("FORTRESS_OBSERVABILITY_EXCLUDED_VMS", "").split(",")
         if vm_name.strip()
     }
+
+
+def _grafana_dashboard_filename(intent):
+    return f"{intent.view_id.replace(':', '-')}.json"
+
+
+def _grafana_dashboard_json(intent, telemetry_targets):
+    if intent.entity_kind == "vm" and intent.view_kind == "vm_baseline":
+        return _grafana_vm_baseline_dashboard(intent)
+    if (
+        intent.entity_kind == "service"
+        and intent.view_kind == "service_profile"
+        and intent.profile == "prometheus_generic"
+    ):
+        return _grafana_prometheus_generic_service_dashboard(intent, telemetry_targets)
+    return _grafana_dashboard_stub(intent)
+
+
+def _grafana_dashboard_stub(intent):
+    return (
+        json.dumps(
+            {
+                "uid": _grafana_dashboard_uid(intent),
+                "title": _grafana_dashboard_title(intent),
+                "schemaVersion": 39,
+                "version": 1,
+                "refresh": "30s",
+                "panels": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _grafana_vm_baseline_dashboard(intent):
+    vm_name = intent.entity_name
+    return (
+        json.dumps(
+            {
+                "uid": _grafana_dashboard_uid(intent),
+                "title": _grafana_dashboard_title(intent),
+                "schemaVersion": 39,
+                "version": 1,
+                "refresh": "30s",
+                "templating": {
+                    "list": [
+                        _grafana_datasource_variable("DS_PROMETHEUS", "prometheus"),
+                        _grafana_datasource_variable("DS_LOKI", "loki"),
+                    ]
+                },
+                "panels": [
+                    _timeseries_panel(
+                        panel_id=1,
+                        title="CPU",
+                        datasource_type="prometheus",
+                        datasource_uid="${DS_PROMETHEUS}",
+                        expr=(
+                            '100 - (avg by (fortress_vm) '
+                            f'(rate(node_cpu_seconds_total{{fortress_vm="{vm_name}", mode="idle"}}[5m])) * 100)'
+                        ),
+                    ),
+                    _timeseries_panel(
+                        panel_id=2,
+                        title="Memory",
+                        datasource_type="prometheus",
+                        datasource_uid="${DS_PROMETHEUS}",
+                        expr=(
+                            f'100 * (1 - (node_memory_MemAvailable_bytes{{fortress_vm="{vm_name}"}} '
+                            f'/ node_memory_MemTotal_bytes{{fortress_vm="{vm_name}"}}))'
+                        ),
+                    ),
+                    _logs_panel(
+                        panel_id=3,
+                        title="System Logs",
+                        datasource_uid="${DS_LOKI}",
+                        expr=f'{{fortress_vm="{vm_name}"}}',
+                    ),
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _grafana_prometheus_generic_service_dashboard(intent, telemetry_targets):
+    service_name = intent.entity_name
+    target_names = tuple(
+        target.name
+        for target in telemetry_targets
+        if target.service_name == service_name and target.target_type == "prometheus_metrics"
+    )
+    target_selector = "|".join(
+        _prometheus_regex_escape(target_name) for target_name in target_names
+    )
+    label_selector = (
+        f'fortress_service="{service_name}", '
+        f'fortress_telemetry_target=~"{target_selector}"'
+    )
+    return (
+        json.dumps(
+            {
+                "uid": _grafana_dashboard_uid(intent),
+                "title": _grafana_dashboard_title(intent),
+                "schemaVersion": 39,
+                "version": 1,
+                "refresh": "30s",
+                "templating": {
+                    "list": [_grafana_datasource_variable("DS_PROMETHEUS", "prometheus")]
+                },
+                "panels": [
+                    _timeseries_panel(
+                        panel_id=1,
+                        title="Service Request Rate",
+                        datasource_type="prometheus",
+                        datasource_uid="${DS_PROMETHEUS}",
+                        expr=(
+                            "sum by (fortress_telemetry_target) "
+                            f"(rate(http_requests_total{{{label_selector}}}[5m]))"
+                        ),
+                    ),
+                    _timeseries_panel(
+                        panel_id=2,
+                        title="Service Error Rate",
+                        datasource_type="prometheus",
+                        datasource_uid="${DS_PROMETHEUS}",
+                        expr=(
+                            "sum by (fortress_telemetry_target) "
+                            f'(rate(http_requests_total{{{label_selector}, status=~"5.."}}[5m]))'
+                        ),
+                    ),
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _grafana_datasource_variable(name, datasource_type):
+    return {
+        "name": name,
+        "type": "datasource",
+        "query": datasource_type,
+        "current": {},
+        "hide": 0,
+        "label": datasource_type.title(),
+    }
+
+
+def _timeseries_panel(panel_id, title, datasource_type, datasource_uid, expr):
+    return {
+        "id": panel_id,
+        "title": title,
+        "type": "timeseries",
+        "datasource": {"type": datasource_type, "uid": datasource_uid},
+        "targets": [
+            {
+                "refId": "A",
+                "datasource": {"type": datasource_type, "uid": datasource_uid},
+                "expr": expr,
+            }
+        ],
+    }
+
+
+def _logs_panel(panel_id, title, datasource_uid, expr):
+    return {
+        "id": panel_id,
+        "title": title,
+        "type": "logs",
+        "datasource": {"type": "loki", "uid": datasource_uid},
+        "targets": [
+            {
+                "refId": "A",
+                "datasource": {"type": "loki", "uid": datasource_uid},
+                "expr": expr,
+            }
+        ],
+    }
+
+
+def _grafana_dashboard_uid(intent):
+    return intent.view_id.replace(":", "-")
+
+
+def _grafana_dashboard_title(intent):
+    if intent.entity_kind == "vm":
+        return f"{intent.entity_name} VM Baseline"
+    if intent.profile:
+        return f"{intent.entity_name} {intent.profile}"
+    return intent.entity_name
+
+
+def _prometheus_regex_escape(value):
+    return "".join(f"\\{char}" if char in r"\.^$*+?{}[]|()" else char for char in value)
 
 
 def _dump_yaml(value, indent=0):

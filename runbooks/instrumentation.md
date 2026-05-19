@@ -49,6 +49,21 @@ First-pass target types are `prometheus_metrics` and `http_probe`. Each target n
 
 The target scheme defaults to http. The prometheus_metrics path defaults to /metrics, and the http_probe path defaults to /. Both defaults may be overridden with `scheme` and `path` on the Telemetry Target. The generated Observability configuration targets the Backend VM static IP and Published Port rather than the Service Ingress hostname.
 
+## Generated Observability Views
+
+Generated Observability Views are derived from Instrumentation and refreshed through `just instrumentation-converge`. The Observability Service rebuilds the current generated Grafana provisioning and dashboard files from Inventory-derived VM-level and Service-level Instrumentation, alongside the generated collector configuration.
+
+First-pass generated views are:
+
+- An automatic `vm_baseline` view for each included ordinary VM whose VM-level Instrumentation remains enabled.
+- An explicit Service-level `prometheus_generic` view for a Service that declares `instrumentation.observability_views` with `profile: prometheus_generic`.
+
+The Service-level view intent applies to the Service Instrumentation declaration as a whole, not to one Telemetry Target. The `prometheus_generic` profile is valid only when the Service has compatible `prometheus_metrics` Telemetry Targets, and one requested Service view summarizes the compatible targets for that Service.
+
+Generated views live in a single Rite-owned generated Grafana folder. Operator edits to generated views are not preserved; change Inventory Instrumentation or the built-in profile definition, then rerun `just instrumentation-converge` to refresh the generated files.
+
+Per docs/adr/0033-grafana-observability-views-use-file-provisioning.md, Rite uses Grafana file provisioning rather than the Grafana HTTP API for generated Observability Views. This keeps generated views rebuildable from Inventory and avoids adding Grafana admin API credentials to Rite.
+
 ## Workflow Boundaries
 
 Service Deploy remains scoped to the named Service. It renders and deploys that Service's artifacts, but it does not refresh the Observability VM when `instrumentation.telemetry_targets` changes.

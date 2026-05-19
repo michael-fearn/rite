@@ -123,6 +123,18 @@
               "path": { "type": "string", "pattern": "^/" }
             }
           }
+        },
+        "observability_views": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["profile"],
+            "properties": {
+              "profile": { "enum": ["prometheus_generic"] }
+            }
+          }
         }
       }
     },

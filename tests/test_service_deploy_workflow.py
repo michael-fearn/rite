@@ -121,6 +121,115 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             self.assertEqual("immich", extra_vars["deploy_service"])
             self.assertEqual("media01", extra_vars["deploy_service_backend_vm"])
 
+    def test_service_deploy_observability_reconciles_current_generated_view_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            calls_log = root / "calls.log"
+            self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+            (root / "inventory" / "vms" / "observability-vm.yaml").write_text(
+                "vmid: 102\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "network:\n"
+                "  interfaces:\n"
+                "    - address: 10.0.10.102/24\n"
+            )
+            (root / "inventory" / "vms" / "observability-vm.sops.yaml").write_text("encrypted vm material\n")
+            (root / "inventory" / "services" / "observability.yaml").write_text(
+                "name: observability\n"
+                "backend:\n"
+                "  vm: observability-vm\n"
+                "  port: 3000\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: grafana\n"
+                "      image: docker.io/grafana/grafana:12.0.0\n"
+                "    - name: prometheus\n"
+                "      image: docker.io/prom/prometheus:v3.4.0\n"
+            )
+            immich_path = root / "inventory" / "services" / "immich.yaml"
+            immich_path.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "  observability_views:\n"
+                "    - profile: prometheus_generic\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      published_ports:\n"
+                "        - container: 2283\n"
+                "          host: 2283\n"
+                "          bind: 0.0.0.0\n"
+            )
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+            env["CALLS_LOG"] = str(calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "observability"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            extra_vars = json.loads(calls_log.read_text().split("--extra-vars ", 1)[1])
+            self.assertEqual(
+                ["/srv/services/observability/grafana-dashboards/generated"],
+                extra_vars["fortress_service_data_reconcile_directories"],
+            )
+            self.assertIn(
+                "/srv/services/observability/grafana-dashboards/generated/service-immich-prometheus_generic.json",
+                [file["path"] for file in extra_vars["fortress_service_data_files"]],
+            )
+
+            immich_path.write_text(immich_path.read_text().replace("  observability_views:\n    - profile: prometheus_generic\n", ""))
+            (root / "inventory" / "vms" / "media01.yaml").write_text(
+                (root / "inventory" / "vms" / "media01.yaml").read_text()
+                + "instrumentation:\n"
+                + "  enabled: false\n"
+            )
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "observability"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            extra_vars = json.loads(calls_log.read_text().split("--extra-vars ", 1)[1])
+            generated_dashboard_paths = [
+                file["path"]
+                for file in extra_vars["fortress_service_data_files"]
+                if file["path"].startswith("/srv/services/observability/grafana-dashboards/generated/")
+            ]
+            self.assertEqual(
+                ["/srv/services/observability/grafana-dashboards/generated/vm-observability-vm-vm_baseline.json"],
+                generated_dashboard_paths,
+            )
+            self.assertEqual(
+                ["/srv/services/observability/grafana-dashboards/generated"],
+                extra_vars["fortress_service_data_reconcile_directories"],
+            )
+
     def test_service_deploy_requires_service_sibling_sops_file_only_when_service_secrets_are_declared(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -538,6 +647,47 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
         )
         self.assertIn("force: \"{{ item.force | default(false) }}\"", playbook)
         self.assertIn("fortress_service_data_files", playbook)
+
+    def test_service_deploy_playbook_reconciles_generated_service_data_before_copying_current_files(self):
+        playbook = (REPO_ROOT / "ansible" / "playbooks" / "service-deploy.yml").read_text()
+
+        self.assertLess(
+            playbook.index("name: Find stale generated Service Data Files"),
+            playbook.index("name: Ensure Service Data Files exist"),
+        )
+        self.assertLess(
+            playbook.index("name: Prune stale generated Service Data Files"),
+            playbook.index("name: Ensure Service Data Files exist"),
+        )
+        self.assertIn("fortress_service_data_reconcile_directories", playbook)
+        self.assertIn("state: absent", playbook)
+
+    def test_observability_deploy_vars_create_parent_directories_for_generated_nested_files(self):
+        model = load_inventory_tree(REPO_ROOT)
+
+        deploy_vars = quadlet_deploy_vars(
+            model.services["observability"],
+            model.vms["observability-vm"],
+            inventory_root=REPO_ROOT / "inventory",
+            model=model,
+        )
+
+        directories = {
+            directory["path"]: directory
+            for directory in deploy_vars["fortress_service_data_directories"]
+        }
+        self.assertIn(
+            "/srv/services/observability/grafana-provisioning/dashboards",
+            directories,
+        )
+        self.assertEqual(
+            {
+                "path": "/srv/services/observability/grafana-provisioning/dashboards",
+                "uid": 1000,
+                "gid": 1000,
+            },
+            directories["/srv/services/observability/grafana-provisioning/dashboards"],
+        )
 
     def test_service_deploy_passes_rendered_artifacts_and_restart_order_to_playbook(self):
         with tempfile.TemporaryDirectory() as tmp:

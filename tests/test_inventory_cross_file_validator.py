@@ -692,6 +692,116 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
             self.assertIn("unreachable_telemetry_target_published_port", {error.code for error in errors})
 
+    def test_service_observability_view_request_accepts_prometheus_generic_with_prometheus_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                published_ports=["        - container: 2283\n", "          bind: 0.0.0.0\n"],
+                extra_fields=(
+                    "instrumentation:\n"
+                    "  telemetry_targets:\n"
+                    "    - name: metrics\n"
+                    "      type: prometheus_metrics\n"
+                    "      published_port: 2283\n"
+                    "  observability_views:\n"
+                    "    - profile: prometheus_generic\n"
+                ),
+            )
+
+            errors = validate_inventory_tree(root)
+
+            self.assertEqual([], errors)
+            self.assertNotIn("unsupported_service_observability_view_profile", {error.code for error in errors})
+            self.assertNotIn("incompatible_service_observability_view_profile", {error.code for error in errors})
+            self.assertEqual(
+                [{"profile": "prometheus_generic"}],
+                load_inventory_tree(root).services["immich"]["instrumentation"]["observability_views"],
+            )
+
+    def test_service_observability_view_request_rejects_unknown_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                published_ports=["        - container: 2283\n", "          bind: 0.0.0.0\n"],
+                extra_fields=(
+                    "instrumentation:\n"
+                    "  telemetry_targets:\n"
+                    "    - name: metrics\n"
+                    "      type: prometheus_metrics\n"
+                    "      published_port: 2283\n"
+                    "  observability_views:\n"
+                    "    - profile: postgres\n"
+                ),
+            )
+
+            self.assertIn(
+                "unsupported_service_observability_view_profile",
+                {error.code for error in validate_inventory_tree(root)},
+            )
+
+    def test_prometheus_generic_observability_view_requires_prometheus_metrics_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                published_ports=["        - container: 2283\n", "          bind: 0.0.0.0\n"],
+                extra_fields=(
+                    "instrumentation:\n"
+                    "  telemetry_targets:\n"
+                    "    - name: health\n"
+                    "      type: http_probe\n"
+                    "      published_port: 2283\n"
+                    "  observability_views:\n"
+                    "    - profile: prometheus_generic\n"
+                ),
+            )
+
+            self.assertIn(
+                "incompatible_service_observability_view_profile",
+                {error.code for error in validate_inventory_tree(root)},
+            )
+
+    def test_service_observability_view_request_rejects_multiple_requests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                published_ports=["        - container: 2283\n", "          bind: 0.0.0.0\n"],
+                extra_fields=(
+                    "instrumentation:\n"
+                    "  telemetry_targets:\n"
+                    "    - name: metrics\n"
+                    "      type: prometheus_metrics\n"
+                    "      published_port: 2283\n"
+                    "  observability_views:\n"
+                    "    - profile: prometheus_generic\n"
+                    "    - profile: prometheus_generic\n"
+                ),
+            )
+
+            self.assertIn(
+                "multiple_service_observability_view_requests",
+                {error.code for error in validate_inventory_tree(root)},
+            )
+
     def test_ingress_published_port_must_be_exactly_one_tcp_capable_backend_port(self):
         invalid_published_ports = [
             [

@@ -75,6 +75,29 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
                 list(observability_refresh.command),
             )
 
+    def test_service_launch_plan_refreshes_observability_when_service_requests_generated_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            self._write_service(
+                root,
+                "instrumented",
+                "media01",
+                ingress_enabled=False,
+                instrumentation_enabled=True,
+                observability_view_enabled=True,
+            )
+
+            plan = build_service_launch_plan(root, "instrumented", auto_confirm=True)
+
+            self.assertEqual(
+                ["vm-lifecycle", "service-deploy", "observability-refresh"],
+                [step.id for step in plan.steps],
+            )
+            self.assertEqual(
+                [str(root / "scripts" / "service-update"), "observability", "--auto-confirm"],
+                list(plan.steps[2].command),
+            )
+
     def test_just_service_launch_calls_workflow_script(self):
         justfile = (REPO_ROOT / "justfile").read_text()
 
@@ -354,15 +377,23 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
         ingress_enabled,
         service_group=None,
         instrumentation_enabled=False,
+        observability_view_enabled=False,
     ):
         ingress = "true" if ingress_enabled else "false"
         group = f"service_group: {service_group}\n" if service_group else ""
+        observability_view = (
+            "  observability_views:\n"
+            "    - profile: prometheus_generic\n"
+            if observability_view_enabled
+            else ""
+        )
         instrumentation = (
             "instrumentation:\n"
             "  telemetry_targets:\n"
             "    - name: metrics\n"
             "      type: prometheus_metrics\n"
             "      published_port: 2283\n"
+            f"{observability_view}"
             if instrumentation_enabled
             else ""
         )
