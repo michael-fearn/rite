@@ -97,7 +97,7 @@ def main():
     if service.get("deploy", {}).get("type") == "native":
         extra_vars.update(native_deploy_vars(service, model.globals, inventory_root=repo_root / "inventory"))
     else:
-        extra_vars.update(quadlet_deploy_vars(service, backend_vm, inventory_root=repo_root / "inventory"))
+        extra_vars.update(quadlet_deploy_vars(service, backend_vm, inventory_root=repo_root / "inventory", model=model))
     if service_secrets or native_environment_secret_keys_:
         extra_vars["fortress_service_sops_file"] = str(service_sops)
     try:

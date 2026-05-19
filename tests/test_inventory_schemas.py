@@ -356,6 +356,28 @@ class InventorySchemaTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_vm_schema_accepts_instrumentation_enabled_opt_out(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vm_yaml = Path(tmp) / "media01.yaml"
+            vm_yaml.write_text(
+                "vmid: 101\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 2\n"
+                "  memory: 4096\n"
+                "cloud_init:\n"
+                "  hostname: media01\n"
+                "instrumentation:\n"
+                "  enabled: false\n"
+            )
+
+            result = self.run_schema("inventory/vms/_schema.json", str(vm_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_service_schema_accepts_share_backed_volumes(self):
         with tempfile.TemporaryDirectory() as tmp:
             service_yaml = Path(tmp) / "immich.yaml"
@@ -394,6 +416,66 @@ class InventorySchemaTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("volumes", result.stdout + result.stderr)
+
+    def test_service_schema_accepts_instrumentation_telemetry_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "      scheme: http\n"
+                "      path: /metrics\n"
+                "    - name: health\n"
+                "      type: http_probe\n"
+                "      published_port: 2283\n"
+                "      path: /healthz\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      published_ports:\n"
+                "        - container: 2283\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_service_schema_rejects_telemetry_target_config_beyond_scheme_and_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service_yaml = Path(tmp) / "immich.yaml"
+            service_yaml.write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "      interval: 30s\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      published_ports:\n"
+                "        - container: 2283\n"
+            )
+
+            result = self.run_schema("inventory/services/_schema.json", str(service_yaml))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interval", result.stdout + result.stderr)
 
     def test_service_schema_rejects_pre_issue_07_quadlet_scaffold_fields(self):
         with tempfile.TemporaryDirectory() as tmp:

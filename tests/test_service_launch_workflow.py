@@ -50,6 +50,31 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
             self.assertEqual([str(root / "scripts" / "vm-up"), "media01"], list(vm_lifecycle.command))
             self.assertEqual([str(root / "scripts" / "service-deploy"), "headless"], list(service_deploy.command))
 
+    def test_service_launch_plan_refreshes_observability_when_service_declares_instrumentation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            self._write_service(
+                root,
+                "instrumented",
+                "media01",
+                ingress_enabled=False,
+                instrumentation_enabled=True,
+            )
+
+            plan = build_service_launch_plan(root, "instrumented", auto_confirm=True)
+
+            self.assertEqual(
+                ["vm-lifecycle", "service-deploy", "observability-refresh"],
+                [step.id for step in plan.steps],
+            )
+            observability_refresh = plan.steps[2]
+            self.assertIsInstance(observability_refresh, CommandPhase)
+            self.assertEqual("Observability Refresh", observability_refresh.display_name)
+            self.assertEqual(
+                [str(root / "scripts" / "service-update"), "observability", "--auto-confirm"],
+                list(observability_refresh.command),
+            )
+
     def test_just_service_launch_calls_workflow_script(self):
         justfile = (REPO_ROOT / "justfile").read_text()
 
@@ -78,6 +103,37 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
                     "vm-up media01 --auto-confirm",
                     "service-deploy immich",
                     "ingress-regenerate",
+                ],
+                calls_log.read_text().splitlines(),
+            )
+
+    def test_service_launch_runs_observability_refresh_when_service_declares_instrumentation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._workflow_fixture(tmp)
+            self._write_service(
+                root,
+                "instrumented",
+                "media01",
+                ingress_enabled=False,
+                instrumentation_enabled=True,
+            )
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-launch"), "instrumented"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [
+                    "vm-up media01",
+                    "service-deploy instrumented",
+                    "service-update observability --auto-confirm",
                 ],
                 calls_log.read_text().splitlines(),
             )
@@ -277,7 +333,7 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
         )
         self._write_service(root, "immich", "media01", ingress_enabled=True)
         calls_log = root / "calls.log"
-        for name in ["vm-up", "service-deploy", "ingress-regenerate"]:
+        for name in ["vm-up", "service-deploy", "service-update", "ingress-regenerate"]:
             script = root / "scripts" / name
             script.write_text(
                 "#!/usr/bin/env bash\n"
@@ -290,9 +346,26 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
             script.chmod(script.stat().st_mode | stat.S_IXUSR)
         return root, calls_log
 
-    def _write_service(self, root, service_name, backend_vm, ingress_enabled, service_group=None):
+    def _write_service(
+        self,
+        root,
+        service_name,
+        backend_vm,
+        ingress_enabled,
+        service_group=None,
+        instrumentation_enabled=False,
+    ):
         ingress = "true" if ingress_enabled else "false"
         group = f"service_group: {service_group}\n" if service_group else ""
+        instrumentation = (
+            "instrumentation:\n"
+            "  telemetry_targets:\n"
+            "    - name: metrics\n"
+            "      type: prometheus_metrics\n"
+            "      published_port: 2283\n"
+            if instrumentation_enabled
+            else ""
+        )
         (root / "inventory" / "services" / f"{service_name}.yaml").write_text(
             f"name: {service_name}\n"
             f"{group}"
@@ -306,6 +379,11 @@ class ServiceLaunchWorkflowTests(unittest.TestCase):
             "  containers:\n"
             "    - name: server\n"
             "      image: example.invalid/service:1\n"
+            "      published_ports:\n"
+            "        - container: 2283\n"
+            "          host: 2283\n"
+            "          bind: 0.0.0.0\n"
+            f"{instrumentation}"
         )
 
     def _workflow_env(self, root, calls_log):

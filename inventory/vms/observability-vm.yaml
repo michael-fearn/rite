@@ -20,4 +20,8 @@ cloud_init:
   hostname: observability-vm
 backup:
   enabled: true
+launchable_service_groups:
+  - name: observability
+    launch_order:
+      - observability
 ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMWTC0h0XDx6mDFqGYD4wm99mOAKZ59cX263kTmR0jHw fortress-vm-prepare:observability-vm:2026-05-15T03:36:10Z

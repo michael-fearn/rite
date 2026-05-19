@@ -64,6 +64,65 @@ class ServiceRuntimeIntentTests(unittest.TestCase):
             ],
         )
 
+    def test_fleet_analysis_resolves_service_telemetry_target_facts(self):
+        model = InventoryStub(
+            vms={"media01": {}},
+            services={
+                "immich": {
+                    "backend": {"vm": "media01", "port": 2283},
+                    "instrumentation": {
+                        "telemetry_targets": [
+                            {
+                                "name": "metrics",
+                                "type": "prometheus_metrics",
+                                "published_port": 2283,
+                            },
+                            {
+                                "name": "health",
+                                "type": "http_probe",
+                                "published_port": 2283,
+                                "scheme": "https",
+                                "path": "/healthz",
+                            },
+                        ]
+                    },
+                    "deploy": {
+                        "type": "quadlet",
+                        "containers": [
+                            {
+                                "name": "server",
+                                "published_ports": [
+                                    {"container": 2283, "bind": "0.0.0.0"},
+                                ],
+                            }
+                        ],
+                    },
+                }
+            },
+        )
+
+        intent = analyze_service_runtime_intent(model)
+
+        self.assertEqual((), intent.diagnostics)
+        self.assertEqual(
+            [
+                ("immich", "media01", "metrics", "prometheus_metrics", 2283, "http", "/metrics"),
+                ("immich", "media01", "health", "http_probe", 2283, "https", "/healthz"),
+            ],
+            [
+                (
+                    target.service_name,
+                    target.vm_name,
+                    target.name,
+                    target.target_type,
+                    target.published_port,
+                    target.scheme,
+                    target.path,
+                )
+                for target in intent.telemetry_targets
+            ],
+        )
+
     def test_fleet_analysis_diagnoses_backend_port_collisions_and_keeps_facts(self):
         model = InventoryStub(
             vms={"media01": {}},

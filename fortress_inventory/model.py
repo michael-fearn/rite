@@ -26,7 +26,7 @@ def load_inventory_tree(root):
     return InventoryModel(
         root=root,
         hosts=_load_entity_dir(inventory_root / "hosts"),
-        vms=_load_entity_dir(inventory_root / "vms"),
+        vms=_default_vms(_load_entity_dir(inventory_root / "vms")),
         services=_default_services(services),
         datasets=_load_entity_dir(inventory_root / "datasets"),
         nas_endpoints=_load_entity_dir(inventory_root / "nas"),
@@ -52,6 +52,23 @@ def _load_optional_yaml(path):
     if not path.is_file():
         return {}
     return load_yaml(path)
+
+
+def _default_vms(vms):
+    return {
+        vm_name: _default_vm(vm)
+        for vm_name, vm in vms.items()
+    }
+
+
+def _default_vm(vm):
+    vm = deepcopy(vm)
+    lifecycle = vm.get("lifecycle", {}) or {}
+    if lifecycle.get("kind", "ordinary") == "ordinary":
+        instrumentation = dict(vm.get("instrumentation") or {})
+        instrumentation.setdefault("enabled", True)
+        vm["instrumentation"] = instrumentation
+    return vm
 
 
 def _default_services(services):

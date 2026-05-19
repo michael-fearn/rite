@@ -40,6 +40,7 @@ class ServiceDataFile:
     uid: int | None = None
     gid: int | None = None
     mode: str = "0644"
+    force: bool = False
 
 
 @dataclass(frozen=True)

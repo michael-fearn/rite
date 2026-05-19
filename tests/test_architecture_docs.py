@@ -16,6 +16,7 @@ class ArchitectureDocsTests(unittest.TestCase):
             "fortress_workflows.service_launch",
             "fortress_workflows.service_group_launch",
             "fortress_workflows.host_readiness",
+            "fortress_workflows.instrumentation_convergence",
             "fortress_workflows.runner",
             "plan builders own domain-specific ceremony rules",
             "runner owns execution mechanics",
@@ -33,11 +34,26 @@ class ArchitectureDocsTests(unittest.TestCase):
             REPO_ROOT / "scripts" / "service-launch",
             REPO_ROOT / "scripts" / "service-group-launch",
             REPO_ROOT / "scripts" / "host-up",
+            REPO_ROOT / "scripts" / "instrumentation-converge",
         ]:
             with self.subTest(path=path):
                 script = path.read_text()
                 self.assertNotIn("def run_phase", script)
                 self.assertNotIn("def phase_detail", script)
+
+    def test_architecture_notes_observability_is_current_workflow_scope(self):
+        content = (REPO_ROOT / "docs" / "architecture.md").read_text()
+
+        for phrase in [
+            "Instrumentation Convergence",
+            "Service Deploy remains scoped to the named Service",
+            "Observability refresh",
+            "Monitoring / observability baseline",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, content)
+
+        self.assertNotIn("Monitoring / observability — out of scope for v1", content)
 
     def test_architecture_notes_describe_current_ingress_regeneration_model(self):
         content = (REPO_ROOT / "docs" / "architecture.md").read_text()

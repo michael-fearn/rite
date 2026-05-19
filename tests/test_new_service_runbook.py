@@ -192,7 +192,8 @@ class NewServiceRunbookTests(unittest.TestCase):
         for phrase in [
             "Service Launch",
             "just service-launch service=<service>",
-            "wrapper over `vm-up`, `service-deploy`, and conditional `ingress-regenerate`",
+            "wrapper over `vm-up`, `service-deploy`, conditional `ingress-regenerate`, and conditional Observability refresh",
+            "runs `service-update observability --auto-confirm` when the launched Service declares Service-level Instrumentation",
             "Host Configure, NAS Reconcile, and Ingress infrastructure readiness are prerequisites",
             "does not run `host-bootstrap`, `host-configure`, `nas-reconcile`, `service-deploy internal-ingress`, or Service Deploy for DNS Services",
         ]:
@@ -208,6 +209,7 @@ class NewServiceRunbookTests(unittest.TestCase):
             "service-group-launch <group>",
             "VM-declared Service Group Launch Order",
             "not Service Update",
+            "runs `service-update observability --auto-confirm` after Service Deploy phases when any launched Service declares Service-level Instrumentation",
             "There is no Service Group Update workflow",
         ]:
             with self.subTest(phrase=phrase):

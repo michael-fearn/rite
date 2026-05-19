@@ -5,6 +5,7 @@ from pathlib import Path
 from fortress_inventory.entity_graph import InventoryEntityGraph
 from fortress_inventory.model import load_inventory_tree
 from fortress_workflows.runner import CommandPhase, OperatorWorkflowPlan
+from fortress_workflows.service_launch import service_declares_application_instrumentation
 
 
 def build_service_group_launch_plan(
@@ -38,6 +39,19 @@ def build_service_group_launch_plan(
                     f"Service Deploy failed for Service {service_name} "
                     f"in Service Group Launch {service_group}"
                 ),
+                streaming=True,
+            )
+        )
+    if any(
+        service_declares_application_instrumentation(model.services[service_name])
+        for service_name in intent.service_names
+    ):
+        steps.append(
+            CommandPhase(
+                id="observability-refresh",
+                display_name="Observability Refresh",
+                command=[str(repo_root / "scripts" / "service-update"), "observability", "--auto-confirm"],
+                diagnostic_label=f"Observability Refresh failed after Service Group Launch {service_group}",
                 streaming=True,
             )
         )

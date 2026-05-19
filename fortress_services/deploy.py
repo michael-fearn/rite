@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from pathlib import PurePosixPath
 
+from fortress_services.observability_config import observability_service_data_files
 from fortress_services.quadlet import render_quadlet_service
 
 
@@ -145,9 +146,12 @@ def _preflight_structured_secret_shape(service_name, service_sops_path, secret_k
             )
 
 
-def quadlet_deploy_vars(service, vm, inventory_root=None):
+def quadlet_deploy_vars(service, vm, inventory_root=None, model=None):
     service = _service_with_deploy_capability_setup(service)
     rendered = render_quadlet_service(service, vm, inventory_root=inventory_root)
+    service_data_files = list(rendered.service_data_files)
+    if service.get("name") == "observability" and model is not None:
+        service_data_files.extend(observability_service_data_files(model))
     start_units = service_start_units(service)
     network_units = quadlet_network_units(rendered.artifacts)
     return {
@@ -161,7 +165,7 @@ def quadlet_deploy_vars(service, vm, inventory_root=None):
         ],
         "fortress_service_data_files": [
             service_data_file_vars(file)
-            for file in rendered.service_data_files
+            for file in service_data_files
         ],
         "fortress_service_network_units": network_units,
         "fortress_service_start_units": start_units,
@@ -288,6 +292,8 @@ def service_data_file_vars(file):
         values["uid"] = file.uid
     if file.gid is not None:
         values["gid"] = file.gid
+    if file.force:
+        values["force"] = True
     return values
 
 

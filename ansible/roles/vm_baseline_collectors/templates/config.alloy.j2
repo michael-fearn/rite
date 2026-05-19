@@ -1,0 +1,17 @@
+logging {
+  level = "info"
+}
+
+loki.source.journal "systemd" {
+  forward_to = [loki.write.observability.receiver]
+  labels = {
+    fortress_vm = "{{ inventory_hostname }}",
+    hostname = "{{ fortress_vm.cloud_init.hostname | default(inventory_hostname) }}",
+  }
+}
+
+loki.write "observability" {
+  endpoint {
+    url = "{{ fortress_vm_baseline_collectors_loki_url }}"
+  }
+}

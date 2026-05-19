@@ -13,6 +13,10 @@ PUBLISHED_PORT_RUNTIME_DIAGNOSTICS = {
     "invalid_ingress_published_port",
     "missing_ingress_published_port",
 }
+TELEMETRY_TARGET_RUNTIME_DIAGNOSTICS = {
+    "missing_telemetry_target_published_port",
+    "unreachable_telemetry_target_published_port",
+}
 
 
 def validate_service_ingress_contract(model):
@@ -75,6 +79,7 @@ def validate_service_backends(model):
 def validate_quadlet_services(model):
     errors = []
     errors.extend(_validate_published_ports(model))
+    errors.extend(_validate_service_telemetry_targets(model))
     errors.extend(_validate_service_images(model))
     errors.extend(_validate_service_networks(model))
     errors.extend(_validate_container_dependencies(model))
@@ -118,6 +123,13 @@ def _validate_published_ports(model):
     return _runtime_diagnostics_as_validation_errors(
         analyze_service_runtime_intent(model),
         PUBLISHED_PORT_RUNTIME_DIAGNOSTICS,
+    )
+
+
+def _validate_service_telemetry_targets(model):
+    return _runtime_diagnostics_as_validation_errors(
+        analyze_service_runtime_intent(model),
+        TELEMETRY_TARGET_RUNTIME_DIAGNOSTICS,
     )
 
 

@@ -19,7 +19,7 @@ The system is designed for a single operator, no CI yet (CI is a known future ad
 
 Operator-facing ceremonies that compose several existing commands use an **Operator Workflow Plan** plus the **Operator Workflow Runner**. Use this seam when a workflow needs ordered phases, an approval point, reusable failure policy, or subprocess diagnostics across more than one underlying script. Keep a narrow single-purpose script when it already performs one concrete operation and does not need cross-phase orchestration.
 
-An **Operator Workflow Plan** is the inspectable declaration for one invocation: phase IDs, display names, commands, diagnostic labels, confirmation gates, and any per-phase failure policy. The plan builder module owns the domain ceremony: `fortress_workflows.vm_lifecycle` knows Prepare, selected OpenTofu plan/apply, and Configure; `fortress_workflows.service_launch` knows Backend VM readiness, Service Deploy, and optional Ingress Regeneration for one Service; `fortress_workflows.service_group_launch` knows Backend VM readiness, ordered Service Deploy phases, and final optional Ingress Regeneration for one launchable Service Group; `fortress_workflows.host_readiness` knows bootstrap satisfaction, Host Configure scope, Template Verification, and the Template x NAS Endpoint acceptance matrix. In short, plan builders own domain-specific ceremony rules.
+An **Operator Workflow Plan** is the inspectable declaration for one invocation: phase IDs, display names, commands, diagnostic labels, confirmation gates, and any per-phase failure policy. The plan builder module owns the domain ceremony: `fortress_workflows.vm_lifecycle` knows Prepare, selected OpenTofu plan/apply, and Configure; `fortress_workflows.service_launch` knows Backend VM readiness, Service Deploy, optional Ingress Regeneration, and optional Observability refresh for one Service; `fortress_workflows.service_group_launch` knows Backend VM readiness, ordered Service Deploy phases, final optional Ingress Regeneration, and optional Observability refresh for one launchable Service Group; `fortress_workflows.host_readiness` knows bootstrap satisfaction, Host Configure scope, Template Verification, and the Template x NAS Endpoint acceptance matrix; `fortress_workflows.instrumentation_convergence` knows enabled VM-level Instrumentation convergence and Observability Service refresh. In short, plan builders own domain-specific ceremony rules.
 
 The runner owns execution mechanics. The **Operator Workflow Runner** in `fortress_workflows.runner` executes plan steps in order, enforces confirmation gates, runs subprocesses, applies the stop versus continue failure policy, emits streaming prefix output for long-running phases, keeps captured tails for streaming diagnostics, and returns standardized failure detail for scripts to render with their workflow-specific diagnostic labels. VM Lifecycle Convergence, Service Launch, Service Group Launch, and Host Readiness entrypoint scripts should call a plan builder and `OperatorWorkflowRunner`; they should not grow local `run_phase`, `phase_detail`, confirmation-loop, streaming, or subprocess orchestration implementations.
 
@@ -29,6 +29,7 @@ Current runner-backed workflows:
 - `scripts/service-launch` builds Service Launch with `build_service_launch_plan`.
 - `scripts/service-group-launch` builds Service Group Launch with `build_service_group_launch_plan`.
 - `scripts/host-up` builds Host Readiness with `build_host_readiness_plan`.
+- `scripts/instrumentation-converge` builds Instrumentation Convergence with `build_instrumentation_convergence_plan`.
 
 ---
 
@@ -572,6 +573,12 @@ Manual Pi-hole records are outside generated DNS ownership. Operators may keep U
 
 Let's Encrypt via DNS-01 challenge through Cloudflare API (scope: DNS edit on `fearn.cloud` only). Real public certs for internal hostnames without exposing services to the internet. The Cloudflare API Token lives in `inventory/services/internal-ingress.sops.yaml`. Token must be provisioned out-of-band before first deploy.
 
+### 10.8. Observability
+
+Monitoring / observability baseline support is in scope through declared Instrumentation. Ordinary VMs receive default VM-level Instrumentation unless opted out, and VM Configure applies the baseline node exporter plus Grafana Alloy collector set.
+
+Instrumentation Convergence applies enabled VM-level Instrumentation across ordinary VMs and refreshes the Observability Service from current VM and Service Instrumentation declarations. Service Deploy remains scoped to the named Service and does not refresh the Observability VM. Observability refresh belongs to `just instrumentation-converge` for existing declarations, or to higher-level Service Launch and Service Group Launch when those workflows deploy Services that declare Service-level Instrumentation.
+
 ---
 
 ## 11. GPU Passthrough
@@ -898,4 +905,3 @@ All rotations follow hard-cutover policy (no grace-period overlap; recovery via 
 - **Pi-hole + Unbound architecture detail** — likely one VM with two containers in a shared podman network, exact split decided at implementation time.
 - **VM disk passthrough schema** — would be needed if PBS datastore moves from NFS to passed-through raw disk.
 - **PVE/host firewall** — out of scope for v1.
-- **Monitoring / observability** — out of scope for v1; revisit when the service stack stabilizes.

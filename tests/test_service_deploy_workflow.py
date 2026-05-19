@@ -69,6 +69,58 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             self.assertNotIn("fortress_service_sops_file", extra_vars)
             self.assertEqual([], extra_vars["fortress_service_secrets"])
 
+    def test_service_deploy_with_instrumentation_remains_scoped_to_named_service(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["cp", "-R", str(FIXTURES / "inventory_valid") + "/.", str(root)], check=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            calls_log = root / "calls.log"
+            self._fake_decrypt_keys(scripts_dir / "decrypt-keys", calls_log)
+            (root / "inventory" / "vms" / "media01.sops.yaml").write_text("encrypted vm material\n")
+            (root / "inventory" / "services" / "immich.yaml").write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: metrics\n"
+                "      type: prometheus_metrics\n"
+                "      published_port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      published_ports:\n"
+                "        - container: 2283\n"
+                "          host: 2283\n"
+                "          bind: 0.0.0.0\n"
+            )
+            env = os.environ.copy()
+            env["FORTRESS_ROOT"] = str(root)
+            env["CALLS_LOG"] = str(calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-deploy"), "immich"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            command = calls_log.read_text()
+            self.assertIn("ansible-playbook", command)
+            self.assertIn("service-deploy.yml", command)
+            self.assertNotIn("service-update", command)
+            self.assertNotIn("observability", command)
+            extra_vars = json.loads(command.split("--extra-vars ", 1)[1])
+            self.assertEqual("immich", extra_vars["deploy_service"])
+            self.assertEqual("media01", extra_vars["deploy_service_backend_vm"])
+
     def test_service_deploy_requires_service_sibling_sops_file_only_when_service_secrets_are_declared(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -484,7 +536,7 @@ class ServiceDeployWorkflowTests(unittest.TestCase):
             playbook.index("name: Ensure Service Data Files exist"),
             playbook.index("name: Start Service containers in dependency order"),
         )
-        self.assertIn("force: false", playbook)
+        self.assertIn("force: \"{{ item.force | default(false) }}\"", playbook)
         self.assertIn("fortress_service_data_files", playbook)
 
     def test_service_deploy_passes_rendered_artifacts_and_restart_order_to_playbook(self):

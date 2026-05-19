@@ -1,0 +1,71 @@
+- name: Apply baseline VM collectors
+  when: "(fortress_vm.lifecycle.kind | default('ordinary')) == 'ordinary' and ((fortress_vm.instrumentation | default({'enabled': true})).enabled | default(true) | bool)"
+  block:
+    - name: Resolve Observability Service Loki endpoint
+      ansible.builtin.set_fact:
+        fortress_vm_baseline_collectors_loki_url: >-
+          http://{{ hostvars[fortress_services[fortress_vm_baseline_collectors_observability_service_name | default('observability')].backend.vm].ansible_host }}:{{ fortress_vm_baseline_collectors_loki_port | default(3100) }}/loki/api/v1/push
+
+    - name: Ensure Grafana apt keyring directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+      when: fortress_vm_baseline_collectors_manage_packages | default(true) | bool
+
+    - name: Install Grafana apt repository key
+      ansible.builtin.get_url:
+        url: https://apt.grafana.com/gpg-full.key
+        dest: /etc/apt/keyrings/grafana.asc
+        mode: "0644"
+      when: fortress_vm_baseline_collectors_manage_packages | default(true) | bool
+
+    - name: Configure Grafana apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/grafana.list
+        mode: "0644"
+        content: |
+          deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main
+      when: fortress_vm_baseline_collectors_manage_packages | default(true) | bool
+
+    - name: Install node exporter and Grafana Alloy
+      ansible.builtin.apt:
+        name:
+          - prometheus-node-exporter
+          - alloy
+        state: present
+        update_cache: true
+      when: fortress_vm_baseline_collectors_manage_packages | default(true) | bool
+
+    - name: Allow Grafana Alloy to read the system journal
+      ansible.builtin.user:
+        name: alloy
+        groups:
+          - adm
+          - systemd-journal
+        append: true
+      when: fortress_vm_baseline_collectors_manage_services | default(true) | bool
+
+    - name: Ensure Alloy config directory exists
+      ansible.builtin.file:
+        path: "{{ fortress_vm_baseline_collectors_alloy_config_dir | default('/etc/alloy') }}"
+        state: directory
+        mode: "0755"
+
+    - name: Render Alloy VM log collection config
+      ansible.builtin.template:
+        src: config.alloy.j2
+        dest: "{{ fortress_vm_baseline_collectors_alloy_config_path | default('/etc/alloy/config.alloy') }}"
+        mode: "0644"
+      notify: Restart Grafana Alloy
+
+    - name: Enable and start node exporter and Grafana Alloy
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        daemon_reload: true
+        enabled: true
+        state: started
+      loop:
+        - prometheus-node-exporter
+        - alloy
+      when: fortress_vm_baseline_collectors_manage_services | default(true) | bool

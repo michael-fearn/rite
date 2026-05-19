@@ -1,0 +1,6 @@
+- name: Restart Grafana Alloy
+  ansible.builtin.systemd:
+    name: alloy
+    daemon_reload: true
+    state: restarted
+  when: fortress_vm_baseline_collectors_manage_services | default(true) | bool

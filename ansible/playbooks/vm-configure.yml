@@ -22,6 +22,11 @@
       when: fortress_vm.tailnet_subnet_router is defined
       tags: [tailnet_subnet_router]
 
+    - name: Configure VM baseline collectors
+      ansible.builtin.include_role:
+        name: vm_baseline_collectors
+      tags: [vm_baseline_collectors]
+
     - name: Finalize VM admin user
       ansible.builtin.include_role:
         name: vm_admin_user

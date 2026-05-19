@@ -53,7 +53,7 @@
       ansible.builtin.copy:
         dest: "{{ item.path }}"
         content: "{{ item.content }}"
-        force: false
+        force: "{{ item.force | default(false) }}"
         owner: "{{ item.uid | default(omit) }}"
         group: "{{ item.gid | default(omit) }}"
         mode: "{{ item.mode }}"

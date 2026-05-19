@@ -80,6 +80,54 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
                 list(ingress_regeneration.command),
             )
 
+    def test_service_group_launch_plan_refreshes_observability_when_any_service_declares_instrumentation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _calls_log = self._workflow_fixture(tmp)
+            self._write_service(
+                root,
+                "sonarr",
+                "media01",
+                deploy_type="quadlet",
+                ingress_enabled=False,
+                instrumentation_enabled=True,
+            )
+
+            plan = build_service_group_launch_plan(root, "media")
+
+            self.assertEqual(
+                [
+                    "vm-lifecycle",
+                    "service-deploy:prowlarr",
+                    "service-deploy:sonarr",
+                    "observability-refresh",
+                ],
+                [step.id for step in plan.steps],
+            )
+            observability_refresh = plan.steps[-1]
+            self.assertIsInstance(observability_refresh, CommandPhase)
+            self.assertEqual("Observability Refresh", observability_refresh.display_name)
+            self.assertEqual(
+                [str(root / "scripts" / "service-update"), "observability", "--auto-confirm"],
+                list(observability_refresh.command),
+            )
+
+    def test_observability_service_group_launch_plan_uses_observability_vm_and_service(self):
+        plan = build_service_group_launch_plan(REPO_ROOT, "observability", auto_confirm=True)
+
+        self.assertEqual("service-group-launch:observability", plan.id)
+        self.assertEqual(
+            ["vm-lifecycle", "service-deploy:observability", "ingress-regeneration"],
+            [step.id for step in plan.steps],
+        )
+        self.assertEqual(
+            [str(REPO_ROOT / "scripts" / "vm-up"), "observability-vm", "--auto-confirm"],
+            list(plan.steps[0].command),
+        )
+        self.assertEqual(
+            [str(REPO_ROOT / "scripts" / "service-deploy"), "observability"],
+            list(plan.steps[1].command),
+        )
+
     def test_service_group_launch_plan_omits_ingress_regeneration_when_no_launched_service_declares_ingress(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, _calls_log = self._workflow_fixture(tmp)
@@ -137,6 +185,40 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
                     "vm-up media01 --auto-confirm",
                     "service-deploy prowlarr",
                     "service-deploy sonarr",
+                ],
+                calls_log.read_text().splitlines(),
+            )
+
+    def test_service_group_launch_script_runs_observability_refresh_when_any_service_declares_instrumentation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, calls_log = self._workflow_fixture(tmp)
+            self._write_service(
+                root,
+                "sonarr",
+                "media01",
+                deploy_type="quadlet",
+                ingress_enabled=False,
+                instrumentation_enabled=True,
+            )
+            self._write_fake_command_scripts(root)
+            env = self._workflow_env(root, calls_log)
+
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "service-group-launch"), "media"],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                [
+                    "vm-up media01",
+                    "service-deploy prowlarr",
+                    "service-deploy sonarr",
+                    "service-update observability --auto-confirm",
                 ],
                 calls_log.read_text().splitlines(),
             )
@@ -236,8 +318,25 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
         self._write_service(root, "sonarr", "media01", deploy_type="quadlet", ingress_enabled=False)
         return root, root / "calls.log"
 
-    def _write_service(self, root, service_name, backend_vm, deploy_type, ingress_enabled):
+    def _write_service(
+        self,
+        root,
+        service_name,
+        backend_vm,
+        deploy_type,
+        ingress_enabled,
+        instrumentation_enabled=False,
+    ):
         ingress = "true" if ingress_enabled else "false"
+        instrumentation = (
+            "instrumentation:\n"
+            "  telemetry_targets:\n"
+            "    - name: metrics\n"
+            "      type: prometheus_metrics\n"
+            "      published_port: 8080\n"
+            if instrumentation_enabled
+            else ""
+        )
         if deploy_type == "native":
             deploy_yaml = (
                 "deploy:\n"
@@ -252,6 +351,10 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
                 "  containers:\n"
                 f"    - name: {service_name}\n"
                 f"      image: example.invalid/{service_name}:1\n"
+                "      published_ports:\n"
+                "        - container: 8080\n"
+                "          host: 8080\n"
+                "          bind: 0.0.0.0\n"
             )
         (root / "inventory" / "services" / f"{service_name}.yaml").write_text(
             f"name: {service_name}\n"
@@ -262,10 +365,11 @@ class ServiceGroupLaunchWorkflowTests(unittest.TestCase):
             "ingress:\n"
             f"  enabled: {ingress}\n"
             f"{deploy_yaml}"
+            f"{instrumentation}"
         )
 
     def _write_fake_command_scripts(self, root):
-        for name in ["vm-up", "service-deploy", "ingress-regenerate"]:
+        for name in ["vm-up", "service-deploy", "service-update", "ingress-regenerate"]:
             script = root / "scripts" / name
             script.write_text(
                 "#!/usr/bin/env bash\n"

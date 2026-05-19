@@ -24,6 +24,9 @@ deploy:
           host: 9090
           container: 9090
       volumes:
+        - service_path: prometheus-config
+          container: /etc/prometheus
+          access: read_only
         - service_path: prometheus
           container: /prometheus
           access: read_write

@@ -29,6 +29,46 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
 
         self.assertEqual(model.datasets["media"]["path"], "/mnt/pool/media")
 
+    def test_inventory_model_defaults_ordinary_vm_instrumentation_to_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "vms" / "media01.yaml").write_text(
+                "vmid: 101\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 2\n"
+                "  memory: 4096\n"
+                "cloud_init:\n"
+                "  hostname: media01\n"
+            )
+
+            model = load_inventory_tree(root)
+
+            self.assertEqual({"enabled": True}, model.vms["media01"]["instrumentation"])
+
+            (root / "inventory" / "vms" / "media01.yaml").write_text(
+                "vmid: 101\n"
+                "placement:\n"
+                "  host: wintermute\n"
+                "source:\n"
+                "  template: debian-13-base\n"
+                "hardware:\n"
+                "  cores: 2\n"
+                "  memory: 4096\n"
+                "cloud_init:\n"
+                "  hostname: media01\n"
+                "instrumentation:\n"
+                "  enabled: false\n"
+            )
+
+            model = load_inventory_tree(root)
+
+            self.assertEqual({"enabled": False}, model.vms["media01"]["instrumentation"])
+
     def test_repo_media_vm_declares_media_service_group_launch_order(self):
         model = load_inventory_tree(REPO_ROOT)
 
@@ -41,6 +81,21 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             ],
             model.vms["media-vm"].get("launchable_service_groups"),
         )
+
+    def test_repo_observability_vm_declares_observability_service_group_launch_order(self):
+        model = load_inventory_tree(REPO_ROOT)
+
+        self.assertEqual(
+            [
+                {
+                    "name": "observability",
+                    "launch_order": ["observability"],
+                }
+            ],
+            model.vms["observability-vm"].get("launchable_service_groups"),
+        )
+        error_codes = {error.code for error in validate_inventory_tree(REPO_ROOT)}
+        self.assertNotIn("missing_launch_order_service_group_member", error_codes)
 
     def test_repo_inventory_does_not_commit_acceptance_ephemeral_datasets(self):
         model = load_inventory_tree(REPO_ROOT)
@@ -560,6 +615,82 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             )
 
             self.assertIn("published_port_collision", {error.code for error in validate_inventory_tree(root)})
+
+    def test_telemetry_targets_require_declared_published_port(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                extra_fields=(
+                    "instrumentation:\n"
+                    "  telemetry_targets:\n"
+                    "    - name: metrics\n"
+                    "      type: prometheus_metrics\n"
+                    "      published_port: 9100\n"
+                    "      path: /metrics\n"
+                ),
+            )
+
+            errors = validate_inventory_tree(root)
+
+            self.assertIn("missing_telemetry_target_published_port", {error.code for error in errors})
+
+    def test_native_service_telemetry_targets_require_declared_published_port(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "services" / "caddy.yaml").write_text(
+                "name: caddy\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 80\n"
+                "instrumentation:\n"
+                "  telemetry_targets:\n"
+                "    - name: health\n"
+                "      type: http_probe\n"
+                "      published_port: 80\n"
+                "deploy:\n"
+                "  type: native\n"
+                "  package: caddy\n"
+                "  service_name: caddy\n"
+                "  config_files:\n"
+                "    - template: Caddyfile.j2\n"
+                "      dest: /etc/caddy/Caddyfile\n"
+                "      mode: '0644'\n"
+                "      reload_on_change: true\n"
+            )
+
+            errors = validate_inventory_tree(root)
+
+            self.assertIn("missing_telemetry_target_published_port", {error.code for error in errors})
+
+    def test_telemetry_targets_require_vm_reachable_published_port(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            self.write_fixture_service(
+                root,
+                "immich",
+                ingress_enabled=False,
+                hostname=None,
+                published_ports=["        - container: 2283\n"],
+                extra_fields=(
+                    "instrumentation:\n"
+                    "  telemetry_targets:\n"
+                    "    - name: metrics\n"
+                    "      type: prometheus_metrics\n"
+                    "      published_port: 2283\n"
+                    "      path: /metrics\n"
+                ),
+            )
+
+            errors = validate_inventory_tree(root)
+
+            self.assertIn("unreachable_telemetry_target_published_port", {error.code for error in errors})
 
     def test_ingress_published_port_must_be_exactly_one_tcp_capable_backend_port(self):
         invalid_published_ports = [

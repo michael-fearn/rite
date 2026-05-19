@@ -149,6 +149,15 @@ class VMConfigureWorkflowTests(unittest.TestCase):
             playbook.index("name: vm_admin_user"),
         )
 
+    def test_vm_configure_playbook_applies_baseline_collectors_before_admin_finalization(self):
+        playbook = (REPO_ROOT / "ansible" / "playbooks" / "vm-configure.yml").read_text()
+
+        self.assertIn("name: vm_baseline_collectors", playbook)
+        self.assertLess(
+            playbook.index("name: vm_baseline_collectors"),
+            playbook.index("name: vm_admin_user"),
+        )
+
     def test_vm_admin_user_role_uses_only_builtin_modules_for_configure(self):
         role = (REPO_ROOT / "ansible" / "roles" / "vm_admin_user" / "tasks" / "main.yml").read_text()
 

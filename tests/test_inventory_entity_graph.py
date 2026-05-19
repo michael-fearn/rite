@@ -8,6 +8,7 @@ from fortress_inventory.entity_graph import (
     DesiredNfsShareInput,
     HostUpdateImpactedVm,
     HostUpdateRebootImpact,
+    InstrumentedVmFact,
     MountDatasetFact,
     HostBridgeFact,
     InventoryEntityGraph,
@@ -15,6 +16,7 @@ from fortress_inventory.entity_graph import (
     ServiceGroupLaunchIntent,
     ServiceLaunchIntent,
     ServiceShareBackedVolumeFact,
+    ServiceTelemetryTargetFact,
     TemplateLineageVmFact,
     TemplateVerificationIntent,
     VmLifecycleSelectedHostFacts,
@@ -227,6 +229,75 @@ class InventoryEntityGraphTests(unittest.TestCase):
             "VM media01 declares invalid network.interfaces\\[0\\].address",
         ):
             graph.vm_nfs_client_addresses("media01")
+
+    def test_exposes_instrumented_vms_and_service_telemetry_targets(self):
+        model = inventory_model(
+            vms={
+                "media01": {
+                    "network": {"interfaces": [{"address": "10.0.10.101/24"}]},
+                },
+                "disabled01": {
+                    "instrumentation": {"enabled": False},
+                    "network": {"interfaces": [{"address": "10.0.10.102/24"}]},
+                },
+                "template-verify": {
+                    "lifecycle": {"kind": "operational"},
+                    "network": {"interfaces": [{"address": "10.0.10.231/24"}]},
+                },
+            },
+            services={
+                "immich": {
+                    "backend": {"vm": "media01", "port": 2283},
+                    "instrumentation": {
+                        "telemetry_targets": [
+                            {
+                                "name": "metrics",
+                                "type": "prometheus_metrics",
+                                "published_port": 2283,
+                            }
+                        ],
+                    },
+                    "deploy": {
+                        "type": "quadlet",
+                        "containers": [
+                            {
+                                "name": "server",
+                                "published_ports": [
+                                    {"container": 2283, "bind": "0.0.0.0"},
+                                ],
+                            }
+                        ],
+                    },
+                }
+            },
+        )
+
+        graph = InventoryEntityGraph(model)
+
+        self.assertEqual(
+            (
+                InstrumentedVmFact(
+                    vm_name="media01",
+                    static_ipv4_address="10.0.10.101",
+                ),
+            ),
+            graph.instrumented_vm_facts(),
+        )
+        self.assertEqual(
+            (
+                ServiceTelemetryTargetFact(
+                    service_name="immich",
+                    vm_name="media01",
+                    vm_static_ipv4_address="10.0.10.101",
+                    name="metrics",
+                    target_type="prometheus_metrics",
+                    published_port=2283,
+                    scheme="http",
+                    path="/metrics",
+                ),
+            ),
+            graph.service_telemetry_target_facts(),
+        )
 
     def test_exposes_derived_nfs_share_planning_inputs(self):
         model = inventory_model(
@@ -505,6 +576,19 @@ class InventoryEntityGraphTests(unittest.TestCase):
                 requires_ingress_regeneration=True,
             ),
             graph.service_group_launch_intent("media"),
+        )
+
+    def test_resolves_observability_service_group_launch_intent_from_inventory(self):
+        graph = InventoryEntityGraph(load_inventory_tree(REPO_ROOT))
+
+        self.assertEqual(
+            ServiceGroupLaunchIntent(
+                service_group_name="observability",
+                backend_vm_name="observability-vm",
+                service_names=("observability",),
+                requires_ingress_regeneration=True,
+            ),
+            graph.service_group_launch_intent("observability"),
         )
 
     def test_service_group_launch_intent_rejects_unknown_service_group(self):

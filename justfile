@@ -64,6 +64,10 @@ service-group-launch group auto_confirm="false":
 service-update service auto_confirm="false":
     @if [ "{{auto_confirm}}" = "true" ] || [ "{{auto_confirm}}" = "auto_confirm=true" ]; then ./scripts/service-update {{service}} --auto-confirm; else ./scripts/service-update {{service}}; fi
 
+# Apply declared Instrumentation across ordinary VMs and refresh Observability.
+instrumentation-converge:
+    @./scripts/instrumentation-converge
+
 # Plan NAS Dataset and Share changes against a captured reality JSON file.
 nas-reconcile-plan reality_json:
     @./scripts/nas-reconcile-plan --reality-json {{reality_json}}

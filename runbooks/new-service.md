@@ -124,7 +124,7 @@ Add `auto_confirm=true` when the selected Backend VM apply should skip the inter
 just service-launch service=<service> auto_confirm=true
 ```
 
-Service Launch is a wrapper over `vm-up`, `service-deploy`, and conditional `ingress-regenerate`. It resolves the named Service, validates its declared `backend.vm`, runs `vm-up <backend-vm>`, runs `service-deploy <service>`, and runs `ingress-regenerate` only when that Service declares `ingress.enabled: true`.
+Service Launch is a wrapper over `vm-up`, `service-deploy`, conditional `ingress-regenerate`, and conditional Observability refresh. It resolves the named Service, validates its declared `backend.vm`, runs `vm-up <backend-vm>`, runs `service-deploy <service>`, runs `ingress-regenerate` only when that Service declares `ingress.enabled: true`, and runs `service-update observability --auto-confirm` when the launched Service declares Service-level Instrumentation.
 
 Host Configure, NAS Reconcile, and Ingress infrastructure readiness are prerequisites. Service Launch does not run `host-bootstrap`, `host-configure`, `nas-reconcile`, `service-deploy internal-ingress`, or Service Deploy for DNS Services. It deploys only the named Service, even when other Services share the same Backend VM, Service Group, or Service Network.
 
@@ -142,7 +142,7 @@ The Just recipe calls `service-group-launch <group>` and accepts `auto_confirm=t
 just service-group-launch <group> auto_confirm=true
 ```
 
-Service Group Launch is group-targeted Launch, not Service Update. It runs VM Lifecycle Convergence once for the shared Backend VM, runs ordinary Service Deploy once for each Service in the declared order, and runs Ingress Regeneration once at the end when any launched Service declares Ingress. There is no Service Group Update workflow.
+Service Group Launch is group-targeted Launch, not Service Update. It runs VM Lifecycle Convergence once for the shared Backend VM, runs ordinary Service Deploy once for each Service in the declared order, runs Ingress Regeneration once at the end when any launched Service declares Ingress, and runs `service-update observability --auto-confirm` after Service Deploy phases when any launched Service declares Service-level Instrumentation. There is no Service Group Update workflow.
 
 ## Service-layer Acceptance Test
 

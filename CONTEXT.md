@@ -66,6 +66,10 @@ _Avoid_: Service Group, stack network.
 Declared observability wiring that lets the Observability Service collect VM-level and Service-level telemetry.
 _Avoid_: monitoring config, metrics setup, Service Group.
 
+**Telemetry Target**:
+An application-specific endpoint or probe declared by a Service for collection by the Observability Service.
+_Avoid_: scrape config, Prometheus job.
+
 **Media VM**:
 The Apps VLAN VM that runs media playback, request, catalog, and indexer Services such as Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, and Bazarr.
 _Avoid_: media automation VM, Jellyfin VM.
@@ -509,6 +513,7 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Forgejo Runner VMs** must not be co-located on the **Forgejo VM**.
 - The **Observability VM** is `observability-vm` at `10.40.0.17/24` on the `straylight` Host.
 - The **Observability VM** groups Prometheus, Alertmanager, Grafana, Loki, and Blackbox Exporter.
+- The `observability` **Service Group** is launchable on the **Observability VM**.
 - The **Headscale VM** is `headscale-vm` at `10.40.0.14/24` on the `straylight` Host.
 - The **Headscale VM** is local-only; remote devices must be enrolled while local or with a short-lived pre-auth key minted while local.
 - The **Identity VM** is an Infrastructure VLAN **VM** and must remain local-only.
@@ -522,6 +527,31 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - A **Service** declares logical group membership with `service_group` and private runtime network membership with `service_network`.
 - A **Service** declares **Service Network** membership directly; **Service Network** membership is validated from member **Services**.
 - Existing **Service** declarations that used `service_group` for shared runtime networking migrate by keeping `service_group` and adding matching `service_network`.
+- A **VM** owns its VM-level **Instrumentation** declaration.
+- A **Service** owns its Service-level **Instrumentation** declaration.
+- Ordinary declared **VMs** have VM-level **Instrumentation** by default unless explicitly opted out.
+- A VM-level **Instrumentation** opt-out disables default VM-level **Instrumentation** for one **VM**.
+- Enabled VM-level **Instrumentation** applies the same baseline collector set to every ordinary **VM**.
+- Baseline VM-level **Instrumentation** provides system metrics and VM logs.
+- VM-level **Instrumentation** installs VM-local collectors through VM Configure.
+- The Observability Service collects VM system metrics directly from instrumented **VMs** on the VM network.
+- VM-local log collection pushes VM logs to the Observability Service on the VM network.
+- First-pass **Instrumentation** addresses instrumented **VMs** by declared static IP address.
+- Generic Service runtime **Instrumentation** is default-on for fortress-managed **Services**.
+- Application-specific Service **Instrumentation** is explicitly opted in by the owning **Service**.
+- A **Telemetry Target** is part of a Service's application-specific **Instrumentation**.
+- Service-owned **Telemetry Targets** are declared under the Service's **Instrumentation** declaration.
+- A **Telemetry Target** may be a Prometheus metrics target or an HTTP probe target.
+- First-pass **Telemetry Targets** are collected through VM-reachable **Published Ports**.
+- A first-pass **Telemetry Target** names the VM-reachable **Published Port** that the Observability Service collects.
+- HTTP probe **Telemetry Targets** default to the **Backend** VM static IP and declared VM-reachable **Published Port**, not the Service's Ingress hostname.
+- First-pass **Telemetry Targets** may customize scheme and path only.
+- Instrumentation Convergence applies enabled VM-level **Instrumentation** across ordinary **VMs** and refreshes the **Observability VM** from current **Instrumentation** declarations.
+- Instrumentation Convergence refreshes the **Observability VM** using Service Update semantics for the Observability Service.
+- Service Deploy does not refresh the **Observability VM** when Service-level **Instrumentation** changes.
+- Service Launch and Service Group Launch refresh the **Observability VM** when launched **Services** change **Instrumentation**.
+- The **Observability VM** consumes **Instrumentation** declarations from observed **VMs** and **Services**.
+- The Observability Service's generated collector configuration is an **Application Configuration Artifact**.
 - Media request and playback Services may share a **Service Group** when they have the same storage access and trust boundary.
 - Download clients must run on a separate **VM** from media request and playback Services.
 - The **Media VM** and **Download VM** both consume the media Dataset, while individual **Services** narrow their visible paths through **Share-backed Volumes**.
@@ -828,6 +858,7 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Service Group Launch ordering**: Resolved. Service Group Launch uses an explicit order for every **Service** in the group; the first media order is Prowlarr, Sonarr, Radarr, Bazarr, Jellyfin, then Seerr.
 - **Service Group Update**: Deferred. **Service Update** updates only one named **Service**; coordinated **Service Group** maintenance will be modeled when a real group-level update need appears.
 - **Service health checks**: Deferred. **Service Update** proves systemd unit activation; application-level health semantics require an explicit future Service health contract.
+- **VM-level Instrumentation collector selection**: Deferred. First-pass enabled VM-level **Instrumentation** applies one baseline collector set; per-VM collector profiles belong in a later extension of the VM-level **Instrumentation** declaration and would be applied to existing **VMs** through Instrumentation Convergence.
 - **Fleet Update**: Deferred. Fleet-wide maintenance ordering, batching, and failure isolation will be modeled only after the individual **Host Update**, **Template Update**, **VM Update**, and **Service Update** workflows are proven.
 - **Adopted Share**: Deferred. Existing manual Shares are not adopted by fortress; overlapping unmanaged Shares block **NAS Reconcile** until the Operator removes or otherwise resolves them.
 - **Multi-interface NAS clients**: Deferred. Mount-bearing VMs currently require an unambiguous static IP address for NFS Share client access.

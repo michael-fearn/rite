@@ -104,6 +104,28 @@
         }
       }
     },
+    "instrumentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["telemetry_targets"],
+      "properties": {
+        "telemetry_targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "published_port"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "enum": ["prometheus_metrics", "http_probe"] },
+              "published_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "scheme": { "enum": ["http", "https"] },
+              "path": { "type": "string", "pattern": "^/" }
+            }
+          }
+        }
+      }
+    },
     "deploy": {
       "oneOf": [
         {

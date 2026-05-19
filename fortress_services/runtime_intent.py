@@ -32,15 +32,28 @@ class PublishedPortRuntimeFact:
 
 
 @dataclass(frozen=True)
+class TelemetryTargetRuntimeFact:
+    service_name: str
+    vm_name: str
+    name: str
+    target_type: str
+    published_port: int
+    scheme: str
+    path: str
+
+
+@dataclass(frozen=True)
 class ServiceRuntimeIntent:
     backends: tuple[BackendRuntimeFact, ...]
     published_ports: tuple[PublishedPortRuntimeFact, ...]
+    telemetry_targets: tuple[TelemetryTargetRuntimeFact, ...]
     diagnostics: tuple[RuntimeDiagnostic, ...]
 
 
 def analyze_service_runtime_intent(model):
     backends = []
     published_ports = []
+    telemetry_targets = []
     diagnostics = []
     seen_backend_ports = {}
     seen_published_ports = {}
@@ -81,46 +94,92 @@ def analyze_service_runtime_intent(model):
             else:
                 seen_backend_ports[key] = service_name
 
-        if service.get("deploy", {}).get("type") != "quadlet":
-            continue
+        service_published_ports = []
         ingress_backend_matches = []
-        for container_index, container in enumerate(service.get("deploy", {}).get("containers", []) or []):
-            for port_index, published_port in enumerate(container.get("published_ports", []) or []):
-                container_port = published_port.get("container")
-                host_port = published_port.get("host", container_port)
-                if not (vm_name and host_port and container_port):
-                    continue
-                protocols = _published_port_protocols(published_port.get("protocol", "tcp"))
-                fact = PublishedPortRuntimeFact(
+        deploy_type = service.get("deploy", {}).get("type")
+        if deploy_type == "quadlet":
+            for container_index, container in enumerate(service.get("deploy", {}).get("containers", []) or []):
+                for port_index, published_port in enumerate(container.get("published_ports", []) or []):
+                    container_port = published_port.get("container")
+                    host_port = published_port.get("host", container_port)
+                    if not (vm_name and host_port and container_port):
+                        continue
+                    protocols = _published_port_protocols(published_port.get("protocol", "tcp"))
+                    fact = PublishedPortRuntimeFact(
+                        service_name=service_name,
+                        vm_name=vm_name,
+                        container_name=container.get("name"),
+                        container_index=container_index,
+                        port_index=port_index,
+                        host_port=host_port,
+                        container_port=container_port,
+                        bind=published_port.get("bind", "127.0.0.1"),
+                        protocols=protocols,
+                        ingress=published_port.get("ingress") is True,
+                    )
+                    published_ports.append(fact)
+                    service_published_ports.append(fact)
+                    if fact.ingress and fact.host_port == port and "tcp" in fact.protocols:
+                        ingress_backend_matches.append(fact)
+                    for protocol in protocols:
+                        key = (vm_name, host_port, protocol)
+                        if key in seen_published_ports:
+                            other_service = seen_published_ports[key].service_name
+                            diagnostics.append(
+                                RuntimeDiagnostic(
+                                    "published_port_collision",
+                                    _service_published_port_path(service_name, container_index, port_index, "host"),
+                                    f"Services {other_service} and {service_name} both publish "
+                                    f"{protocol.upper()} port {host_port} on Backend VM {vm_name}",
+                                )
+                            )
+                        else:
+                            seen_published_ports[key] = fact
+        published_ports_by_host_port = {}
+        for published_port in service_published_ports:
+            published_ports_by_host_port.setdefault(published_port.host_port, []).append(published_port)
+        for target_index, target in enumerate(
+            service.get("instrumentation", {}).get("telemetry_targets", []) or []
+        ):
+            published_port = target.get("published_port")
+            matching_published_ports = published_ports_by_host_port.get(published_port, [])
+            if not matching_published_ports:
+                diagnostics.append(
+                    RuntimeDiagnostic(
+                        "missing_telemetry_target_published_port",
+                        _service_telemetry_target_path(service_name, target_index, "published_port"),
+                        f"Service {service_name} Telemetry Target {target.get('name', target_index)} "
+                        f"references undeclared Published Port {published_port}",
+                    )
+                )
+                continue
+            reachable_published_ports = [
+                candidate
+                for candidate in matching_published_ports
+                if "tcp" in candidate.protocols and _published_port_is_vm_reachable(candidate)
+            ]
+            if not reachable_published_ports:
+                diagnostics.append(
+                    RuntimeDiagnostic(
+                        "unreachable_telemetry_target_published_port",
+                        _service_telemetry_target_path(service_name, target_index, "published_port"),
+                        f"Service {service_name} Telemetry Target {target.get('name', target_index)} "
+                        f"references Published Port {published_port}, but it is not VM-reachable",
+                    )
+                )
+                continue
+            telemetry_targets.append(
+                TelemetryTargetRuntimeFact(
                     service_name=service_name,
                     vm_name=vm_name,
-                    container_name=container.get("name"),
-                    container_index=container_index,
-                    port_index=port_index,
-                    host_port=host_port,
-                    container_port=container_port,
-                    bind=published_port.get("bind", "127.0.0.1"),
-                    protocols=protocols,
-                    ingress=published_port.get("ingress") is True,
+                    name=target.get("name"),
+                    target_type=target.get("type"),
+                    published_port=published_port,
+                    scheme=target.get("scheme", "http"),
+                    path=target.get("path", _default_telemetry_target_path(target.get("type"))),
                 )
-                published_ports.append(fact)
-                if fact.ingress and fact.host_port == port and "tcp" in fact.protocols:
-                    ingress_backend_matches.append(fact)
-                for protocol in protocols:
-                    key = (vm_name, host_port, protocol)
-                    if key in seen_published_ports:
-                        other_service = seen_published_ports[key].service_name
-                        diagnostics.append(
-                            RuntimeDiagnostic(
-                                "published_port_collision",
-                                _service_published_port_path(service_name, container_index, port_index, "host"),
-                                f"Services {other_service} and {service_name} both publish "
-                                f"{protocol.upper()} port {host_port} on Backend VM {vm_name}",
-                            )
-                        )
-                    else:
-                        seen_published_ports[key] = fact
-        if service.get("ingress", {}).get("enabled") and port:
+            )
+        if deploy_type == "quadlet" and service.get("ingress", {}).get("enabled") and port:
             if len(ingress_backend_matches) != 1:
                 diagnostics.append(
                     RuntimeDiagnostic(
@@ -143,6 +202,7 @@ def analyze_service_runtime_intent(model):
     return ServiceRuntimeIntent(
         backends=tuple(backends),
         published_ports=tuple(published_ports),
+        telemetry_targets=tuple(telemetry_targets),
         diagnostics=tuple(diagnostics),
     )
 
@@ -153,8 +213,25 @@ def _published_port_protocols(protocol):
     return (protocol or "tcp",)
 
 
+def _published_port_is_vm_reachable(published_port):
+    return published_port.bind not in {"127.0.0.1", "localhost", "::1"}
+
+
 def _service_published_port_path(service_name, container_index, port_index, field):
     return (
         f"inventory/services/{service_name}.yaml.deploy.containers"
         f"[{container_index}].published_ports[{port_index}].{field}"
     )
+
+
+def _service_telemetry_target_path(service_name, target_index, field):
+    return (
+        f"inventory/services/{service_name}.yaml.instrumentation."
+        f"telemetry_targets[{target_index}].{field}"
+    )
+
+
+def _default_telemetry_target_path(target_type):
+    if target_type == "prometheus_metrics":
+        return "/metrics"
+    return "/"

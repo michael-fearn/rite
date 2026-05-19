@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from ipaddress import ip_interface, ip_network
 from pathlib import PurePosixPath
 
+from fortress_services.runtime_intent import analyze_service_runtime_intent
+
 
 class InventoryEntityGraphError(ValueError):
     pass
@@ -59,6 +61,24 @@ class HostBridgeFact:
     name: str | None
     cidr: str | None
     gateway: str | None
+
+
+@dataclass(frozen=True)
+class InstrumentedVmFact:
+    vm_name: str
+    static_ipv4_address: str | None
+
+
+@dataclass(frozen=True)
+class ServiceTelemetryTargetFact:
+    service_name: str
+    vm_name: str
+    vm_static_ipv4_address: str | None
+    name: str
+    target_type: str
+    published_port: int
+    scheme: str
+    path: str
 
 
 @dataclass(frozen=True)
@@ -186,6 +206,32 @@ class InventoryEntityGraph:
 
     def service_backend_port(self, service_name):
         return self._service_backend(service_name).get("port")
+
+    def instrumented_vm_facts(self):
+        return tuple(
+            InstrumentedVmFact(
+                vm_name=vm_name,
+                static_ipv4_address=self.vm_static_ipv4_address(vm_name),
+            )
+            for vm_name, vm in sorted(self._model.vms.items())
+            if _is_ordinary_vm(vm) and (vm.get("instrumentation") or {}).get("enabled", True) is True
+        )
+
+    def service_telemetry_target_facts(self):
+        intent = analyze_service_runtime_intent(self._model)
+        return tuple(
+            ServiceTelemetryTargetFact(
+                service_name=target.service_name,
+                vm_name=target.vm_name,
+                vm_static_ipv4_address=self.vm_static_ipv4_address(target.vm_name),
+                name=target.name,
+                target_type=target.target_type,
+                published_port=target.published_port,
+                scheme=target.scheme,
+                path=target.path,
+            )
+            for target in intent.telemetry_targets
+        )
 
     def service_launch_intent(self, service_name):
         service = self._model.services.get(service_name)
@@ -739,3 +785,7 @@ def _share_backed_source_path(mount_point, source):
     if not mount_point or source in (None, "/"):
         return mount_point
     return str(PurePosixPath(mount_point) / source)
+
+
+def _is_ordinary_vm(vm):
+    return (vm.get("lifecycle") or {}).get("kind", "ordinary") == "ordinary"

@@ -34,6 +34,16 @@ def build_service_launch_plan(repo_root: Path, service: str, auto_confirm: bool 
             streaming=True,
         ),
     ]
+    if service_declares_application_instrumentation(model.services[service]):
+        steps.append(
+            CommandPhase(
+                id="observability-refresh",
+                display_name="Observability Refresh",
+                command=[str(repo_root / "scripts" / "service-update"), "observability", "--auto-confirm"],
+                diagnostic_label=f"Observability Refresh failed after Service Launch {service}",
+                streaming=True,
+            )
+        )
     if intent.requires_ingress_regeneration:
         steps.append(
             CommandPhase(
@@ -46,6 +56,10 @@ def build_service_launch_plan(repo_root: Path, service: str, auto_confirm: bool 
         )
 
     return OperatorWorkflowPlan(id=f"service-launch:{service}", steps=steps)
+
+
+def service_declares_application_instrumentation(service: dict) -> bool:
+    return bool((service.get("instrumentation") or {}).get("telemetry_targets"))
 
 
 def render_service_launch_result(plan: OperatorWorkflowPlan, result: WorkflowResult) -> None:
