@@ -1,4 +1,4 @@
-from fortress_services.runtime_intent import analyze_service_runtime_intent
+from fortress_inventory.service_runtime_intent import analyze_service_runtime_intent
 
 from .errors import ValidationError
 
@@ -70,17 +70,18 @@ def validate_ingress_dns_targets(model):
     return errors
 
 
-def validate_service_backends(model):
+def validate_service_backends(model, runtime_intent=None):
     return _runtime_diagnostics_as_validation_errors(
-        analyze_service_runtime_intent(model),
+        runtime_intent or analyze_service_runtime_intent(model),
         BACKEND_RUNTIME_DIAGNOSTICS,
     )
 
 
-def validate_quadlet_services(model):
+def validate_quadlet_services(model, runtime_intent=None):
     errors = []
-    errors.extend(_validate_published_ports(model))
-    errors.extend(_validate_service_telemetry_targets(model))
+    runtime_intent = runtime_intent or analyze_service_runtime_intent(model)
+    errors.extend(_validate_published_ports(model, runtime_intent))
+    errors.extend(_validate_service_telemetry_targets(model, runtime_intent))
     errors.extend(validate_service_observability_view_requests(model))
     errors.extend(_validate_service_images(model))
     errors.extend(_validate_service_networks(model))
@@ -165,16 +166,16 @@ def validate_native_services(model):
     return errors
 
 
-def _validate_published_ports(model):
+def _validate_published_ports(model, runtime_intent=None):
     return _runtime_diagnostics_as_validation_errors(
-        analyze_service_runtime_intent(model),
+        runtime_intent or analyze_service_runtime_intent(model),
         PUBLISHED_PORT_RUNTIME_DIAGNOSTICS,
     )
 
 
-def _validate_service_telemetry_targets(model):
+def _validate_service_telemetry_targets(model, runtime_intent=None):
     return _runtime_diagnostics_as_validation_errors(
-        analyze_service_runtime_intent(model),
+        runtime_intent or analyze_service_runtime_intent(model),
         TELEMETRY_TARGET_RUNTIME_DIAGNOSTICS,
     )
 

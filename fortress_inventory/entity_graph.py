@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from ipaddress import ip_interface, ip_network
 from pathlib import PurePosixPath
 
-from fortress_services.runtime_intent import analyze_service_runtime_intent
+from fortress_inventory.service_runtime_intent import analyze_service_runtime_intent
 
 
 class InventoryEntityGraphError(ValueError):

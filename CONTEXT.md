@@ -103,7 +103,7 @@ The VM (and TCP port) that the Ingress reverse-proxies a Service to. Declared as
 _Avoid_: upstream (overloaded with apt/git senses).
 
 **Service Runtime Intent**:
-The resolved fortress-owned runtime meaning of one or more Services, projected from Inventory for Service Deploy and validation. Includes Backend placement, Published Ports, Service Data Directories, Service Secrets, Service Network wiring, container start order, and Share-backed Volumes without requiring callers to traverse raw Service yaml.
+The resolved fortress-owned runtime meaning of one or more Services, projected from Inventory for Service Deploy and validation. Includes Backend placement, Published Ports, Service Data Directories, Service Secrets, Service Network wiring, container start order, and Share-backed Volumes without requiring callers to traverse raw Service yaml. It owns Service runtime meaning, not rendered artifacts.
 _Avoid_: raw service config, deploy vars, rendered Quadlet.
 
 **Published Port**:
@@ -881,6 +881,9 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Service Group Launch ordering**: Resolved. Service Group Launch uses an explicit order for every **Service** in the group; the first media order is Prowlarr, Sonarr, Radarr, Bazarr, Jellyfin, then Seerr.
 - **Service Group Update**: Deferred. **Service Update** updates only one named **Service**; coordinated **Service Group** maintenance will be modeled when a real group-level update need appears.
 - **Service health checks**: Deferred. **Service Update** proves systemd unit activation; application-level health semantics require an explicit future Service health contract.
+- **Service Runtime Intent edge**: Resolved. **Service Runtime Intent** owns fortress-owned Service runtime meaning, not rendered artifacts; Quadlet files, Ansible variable names, systemd commands, Grafana JSON, and application-specific configuration remain Adapter concerns.
+- **Service Runtime Intent scope**: Resolved. Fleet-wide **Service Runtime Intent** analysis is canonical because cross-Service facts require global visibility; per-Service access is a convenience view over the fleet-wide result, not a second analysis path.
+- **Service Runtime Intent diagnostics**: Resolved. **Service Runtime Intent** owns diagnostics for runtime-meaning invariants; Inventory validation adapts those diagnostics into operator-facing validation errors, while JSON Schema retains schema-shape validation.
 - **VM-level Instrumentation collector selection**: Deferred. First-pass enabled VM-level **Instrumentation** applies one baseline collector set; per-VM collector profiles belong in a later extension of the VM-level **Instrumentation** declaration and would be applied to existing **VMs** through Instrumentation Convergence.
 - **Additional Observability View Profiles**: Deferred. First-pass generated **Observability Views** support `vm_baseline` and `prometheus_generic`; standalone `http_probe`, generic Service runtime, and application-specific profiles such as Postgres, Caddy, Immich, or Jellyfin require later explicit need.
 - **Fleet Update**: Deferred. Fleet-wide maintenance ordering, batching, and failure isolation will be modeled only after the individual **Host Update**, **Template Update**, **VM Update**, and **Service Update** workflows are proven.

@@ -1,4 +1,5 @@
 from .model import load_inventory_tree
+from .service_runtime_intent import analyze_service_runtime_intent
 from .validation.acceptance import validate_acceptance_policy_host_coverage
 from .validation.datasets import (
     validate_dataset_lifecycle_policy,
@@ -37,13 +38,14 @@ def validate_inventory_tree(root, allow_ephemeral_datasets=False):
 
 def validate_inventory_model(model, allow_ephemeral_datasets=False):
     errors = []
-    errors.extend(validate_service_backends(model))
+    service_runtime_intent = analyze_service_runtime_intent(model)
+    errors.extend(validate_service_backends(model, runtime_intent=service_runtime_intent))
     errors.extend(validate_service_ingress_contract(model))
     errors.extend(validate_ingress_dns_targets(model))
     errors.extend(validate_service_hostnames(model))
     errors.extend(validate_host_proxmox_endpoints(model))
     errors.extend(validate_host_ingress_routes(model))
-    errors.extend(validate_quadlet_services(model))
+    errors.extend(validate_quadlet_services(model, runtime_intent=service_runtime_intent))
     errors.extend(validate_native_services(model))
     errors.extend(validate_service_share_backed_volumes(model))
     errors.extend(validate_vm_inventory_policy(model))

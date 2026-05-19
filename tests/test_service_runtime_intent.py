@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import dataclass
 
-from fortress_services.runtime_intent import analyze_service_runtime_intent
+from fortress_inventory.service_runtime_intent import analyze_service_runtime_intent
 
 
 @dataclass(frozen=True)
