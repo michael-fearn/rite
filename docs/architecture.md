@@ -495,24 +495,24 @@ deploy:
       image: ghcr.io/immich-app/immich-server:v1.120.0
       ports: ["2283:2283"]
       volumes:
-        - host: /opt/services/immich/upload
+        - service_path: upload
           container: /usr/src/app/upload
       env:
         DB_HOSTNAME: immich-postgres
         DB_USERNAME: immich
-      env_from_secrets:
-        - secret: db_password                # ansible loads from <svc>.sops.yaml
-          env_var_file: DB_PASSWORD_FILE     # → /run/secrets/db_password
+      secrets:
+        - secret: secrets.db_password        # structured entry in <svc>.sops.yaml
+          env: DB_PASSWORD_FILE              # -> /run/secrets/fortress_immich_db_password
       depends_on: [immich-postgres, immich-redis]
       requires_mounts: []                    # see §13
     - name: postgres
       image: tensorchord/pgvecto-rs:pg14-v0.2.0
       volumes:
-        - host: /opt/services/immich/postgres
+        - service_path: postgres
           container: /var/lib/postgresql/data
-      env_from_secrets:
-        - secret: db_password
-          env_var_file: POSTGRES_PASSWORD_FILE
+      secrets:
+        - secret: secrets.db_password
+          env: POSTGRES_PASSWORD_FILE
     - name: redis
       image: docker.io/redis:6.2-alpine
 ```
@@ -542,10 +542,11 @@ deploy:
 - **Default: Podman Quadlets** (systemd-native containers). No daemon, journald-integrated logs, systemd dependency graph (`After=`, `Requires=`), `systemctl status <svc>` works.
 - **Native escape hatch**: for things genuinely better as packages (Caddy is the main candidate — single Go binary, well-maintained apt package). Ansible-managed configs equally well in either substrate.
 - **Multi-container as first-class** (not single-container with workarounds). `containers:` is a list; ansible renders one quadlet per entry plus a `.network` quadlet for the shared bridge.
-- **Secrets via Podman secrets** (`Secret=name,target=/run/secrets/name`). Apps consume via `_FILE` env var convention. For apps without `_FILE` support, fall back to `EnvironmentFile=` pointing at a 0600 ansible-templated file.
+- **Service Secrets via Podman secrets** (`Secret=name,target=/run/secrets/name`). Apps consume via `_FILE` env var convention by default; apps that expect the Podman secret name use `env_value: secret_name`. Native Services use Native Service Environment Secrets rendered by Service Deploy into root-owned environment files.
 - **Image pinning by tag** by default (`v1.120.0`), digest-pinning for security-critical containers (Caddy, Pi-hole). **Auto-update off**; updates flow through PR + `just service-deploy`.
 - **Per-service podman networks** (one `.network` quadlet per service). Cross-service traffic blocked unless explicit. Host networking (`network_mode: host`) as opt-in for cases that need it (Pi-hole on :53).
-- **Bind-mount volumes** under `/opt/services/<svc>/<volume>/`. Direct filesystem visibility, easy backup (PBS captures via VM disk snapshot), portable across VM rebuilds.
+- **Service Data Directories** under `/srv/services/<svc>/<path>/`. Direct filesystem visibility, easy backup (PBS captures via VM disk snapshot), portable across VM rebuilds.
+- **Service Runtime Intent** owns resolved Service runtime meaning and diagnostics for Service Data Directories, Share-backed Volumes, and Service Secrets. Quadlet text, Service Deploy Ansible variable names, and native environment file details remain Adapter concerns.
 
 ### 10.5. Ingress
 
@@ -650,7 +651,7 @@ Defaults defined in `group_vars/all.yaml`. Per-VM overrides for special cases (D
 
 ### 12.3. Service data backups
 
-Implicit. Bind-mounted service volumes at `/opt/services/<svc>/` are part of the VM disk; PBS captures them in the VM-level backup. Restoring a service = restoring the VM. No separate file-level backup tooling required for service data.
+Implicit. Service Data Directories at `/srv/services/<svc>/` are part of the VM disk; PBS captures them in the VM-level backup. Restoring a service = restoring the VM. No separate file-level backup tooling required for service data.
 
 ### 12.4. Off-site
 

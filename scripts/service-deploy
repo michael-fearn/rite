@@ -8,6 +8,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fortress_inventory.model import load_inventory_tree
+from fortress_inventory.service_runtime_intent import (
+    analyze_service_runtime_intent,
+    service_runtime_intent_for_service,
+)
 from fortress_inventory.validate import validate_inventory_model
 from fortress_services.deploy import (
     NativeEnvironmentSecretPreflightError,
@@ -40,6 +44,8 @@ def main():
         )
         return 1
 
+    runtime_intent = analyze_service_runtime_intent(model)
+    service_runtime_intent = service_runtime_intent_for_service(runtime_intent, service_name)
     errors = validate_inventory_model(model)
     if errors:
         for error in errors:
@@ -53,9 +59,9 @@ def main():
         print(f"VM Sibling SOPS File is required at {vm_sops}. Run VM Prepare first.", file=sys.stderr)
         return 1
 
-    secret_keys = service_secret_keys(service)
-    service_secrets = service_secret_installations(service)
-    native_environment_secret_keys_ = native_environment_secret_keys(service)
+    secret_keys = service_secret_keys(service, runtime_intent=service_runtime_intent)
+    service_secrets = service_secret_installations(service, runtime_intent=service_runtime_intent)
+    native_environment_secret_keys_ = native_environment_secret_keys(service, runtime_intent=service_runtime_intent)
     service_sops = repo_root / "inventory" / "services" / f"{service_name}.sops.yaml"
     if (service_secrets or native_environment_secret_keys_) and not service_sops.is_file():
         declared_secret_kinds = []
@@ -91,13 +97,32 @@ def main():
         "deploy_service_backend_vm": backend_vm_name,
         "fortress_service": service,
         "fortress_service_deploy_type": service.get("deploy", {}).get("type"),
-        "fortress_share_backed_volume_subpaths": share_backed_volume_subpaths(service, backend_vm),
+        "fortress_share_backed_volume_subpaths": share_backed_volume_subpaths(
+            service,
+            backend_vm,
+            runtime_intent=service_runtime_intent,
+        ),
         "fortress_service_secrets": service_secrets,
     }
     if service.get("deploy", {}).get("type") == "native":
-        extra_vars.update(native_deploy_vars(service, model.globals, inventory_root=repo_root / "inventory"))
+        extra_vars.update(
+            native_deploy_vars(
+                service,
+                model.globals,
+                inventory_root=repo_root / "inventory",
+                runtime_intent=service_runtime_intent,
+            )
+        )
     else:
-        extra_vars.update(quadlet_deploy_vars(service, backend_vm, inventory_root=repo_root / "inventory", model=model))
+        extra_vars.update(
+            quadlet_deploy_vars(
+                service,
+                backend_vm,
+                inventory_root=repo_root / "inventory",
+                model=model,
+                runtime_intent=service_runtime_intent,
+            )
+        )
     if service_secrets or native_environment_secret_keys_:
         extra_vars["fortress_service_sops_file"] = str(service_sops)
     try:

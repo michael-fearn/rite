@@ -17,6 +17,18 @@ TELEMETRY_TARGET_RUNTIME_DIAGNOSTICS = {
     "missing_telemetry_target_published_port",
     "unreachable_telemetry_target_published_port",
 }
+SERVICE_SECRET_RUNTIME_DIAGNOSTICS = {
+    "service_secret_reference_not_sibling_sops_secret",
+    "service_secret_env_not_file",
+}
+SHARE_BACKED_VOLUME_RUNTIME_DIAGNOSTICS = {
+    "missing_service_volume_mount",
+    "unsafe_service_volume_source",
+    "service_volume_widens_mount_access",
+}
+NATIVE_ENVIRONMENT_SECRET_RUNTIME_DIAGNOSTICS = {
+    "native_environment_secret_reference_not_sibling_sops_secret",
+}
 SERVICE_OBSERVABILITY_VIEW_PROFILES = {"prometheus_generic"}
 
 
@@ -86,7 +98,7 @@ def validate_quadlet_services(model, runtime_intent=None):
     errors.extend(_validate_service_images(model))
     errors.extend(_validate_service_networks(model))
     errors.extend(_validate_container_dependencies(model))
-    errors.extend(_validate_service_secrets(model))
+    errors.extend(_validate_service_secrets(model, runtime_intent))
     return errors
 
 
@@ -134,7 +146,7 @@ def validate_service_observability_view_requests(model):
     return errors
 
 
-def validate_native_services(model):
+def validate_native_services(model, runtime_intent=None):
     errors = []
     apt_repos = model.globals.get("apt_repos") or {}
     for service_name, service in model.services.items():
@@ -150,19 +162,12 @@ def validate_native_services(model):
                     f"Service {service_name} references missing apt repository {apt_repo}",
                 )
             )
-        for secret_index, secret in enumerate(deploy.get("environment_secrets", []) or []):
-            secret_ref = secret.get("secret")
-            if secret_ref and not secret_ref.startswith("secrets."):
-                errors.append(
-                    ValidationError(
-                        "native_environment_secret_reference_not_sibling_sops_secret",
-                        (
-                            f"inventory/services/{service_name}.yaml.deploy."
-                            f"environment_secrets[{secret_index}].secret"
-                        ),
-                        f"Service {service_name} Native Service Environment Secret references must use secrets.<name>",
-                    )
-                )
+    errors.extend(
+        _runtime_diagnostics_as_validation_errors(
+            runtime_intent or analyze_service_runtime_intent(model),
+            NATIVE_ENVIRONMENT_SECRET_RUNTIME_DIAGNOSTICS,
+        )
+    )
     return errors
 
 
@@ -315,8 +320,14 @@ def _has_dependency_cycle(graph):
     return any(visit(container_name) for container_name in graph)
 
 
-def _validate_service_secrets(model):
+def _validate_service_secrets(model, runtime_intent=None):
     errors = []
+    errors.extend(
+        _runtime_diagnostics_as_validation_errors(
+            runtime_intent or analyze_service_runtime_intent(model),
+            SERVICE_SECRET_RUNTIME_DIAGNOSTICS,
+        )
+    )
     for service_name, service in model.services.items():
         if service.get("deploy", {}).get("type") != "quadlet":
             continue
@@ -324,24 +335,7 @@ def _validate_service_secrets(model):
             env_names = set((container.get("env") or {}).keys())
             secret_env_names = set()
             for secret_index, secret in enumerate(container.get("secrets", []) or []):
-                secret_ref = secret.get("secret")
                 secret_env = secret.get("env")
-                if secret_ref and not secret_ref.startswith("secrets."):
-                    errors.append(
-                        ValidationError(
-                            "service_secret_reference_not_sibling_sops_secret",
-                            _service_secret_path(service_name, container_index, secret_index, "secret"),
-                            f"Service {service_name} Service Secret references must use secrets.<name>",
-                        )
-                    )
-                if secret_env and not secret_env.endswith("_FILE"):
-                    errors.append(
-                        ValidationError(
-                            "service_secret_env_not_file",
-                            _service_secret_path(service_name, container_index, secret_index, "env"),
-                            f"Service {service_name} Service Secret env {secret_env} must end in _FILE",
-                        )
-                    )
                 if secret_env in secret_env_names:
                     errors.append(
                         ValidationError(
@@ -458,56 +452,11 @@ def _hostname_is_under_domain(hostname, domain):
     return all(labels) and len(labels) > len(domain.split("."))
 
 
-def validate_service_share_backed_volumes(model):
-    errors = []
-    for service_name, service in model.services.items():
-        backend = service.get("backend", {})
-        if not isinstance(backend, dict):
-            continue
-        backend_vm_name = backend.get("vm")
-        backend_vm = model.vms.get(backend_vm_name)
-        if not backend_vm:
-            continue
-        vm_mounts = {
-            mount.get("name"): mount
-            for mount in backend_vm.get("mounts", []) or []
-            if mount.get("name")
-        }
-        for container_index, _container, volume_index, volume in _service_volumes(service):
-            mount_name = volume.get("mount")
-            if not mount_name:
-                continue
-            if _unsafe_share_backed_source(volume.get("source")):
-                errors.append(
-                    ValidationError(
-                        "unsafe_service_volume_source",
-                        _service_volume_path(service_name, container_index, volume_index, "source"),
-                        f"Service {service_name} Share-backed Volume source {volume.get('source')} "
-                        "must be / or a relative subpath without .. traversal",
-                    )
-                )
-            if mount_name not in vm_mounts:
-                errors.append(
-                    ValidationError(
-                        "missing_service_volume_mount",
-                        _service_volume_path(service_name, container_index, volume_index, "mount"),
-                        f"Service {service_name} Share-backed Volume references missing Mount Name {mount_name} "
-                        f"on Backend VM {backend_vm_name}",
-                    )
-                )
-                continue
-            mount = vm_mounts[mount_name]
-            volume_access = volume.get("access", mount.get("access"))
-            if mount.get("access") == "read_only" and volume_access == "read_write":
-                errors.append(
-                    ValidationError(
-                        "service_volume_widens_mount_access",
-                        _service_volume_path(service_name, container_index, volume_index, "access"),
-                        f"Service {service_name} Share-backed Volume requests read_write access to read_only "
-                        f"Mount {mount_name} on Backend VM {backend_vm_name}",
-                    )
-                )
-    return errors
+def validate_service_share_backed_volumes(model, runtime_intent=None):
+    return _runtime_diagnostics_as_validation_errors(
+        runtime_intent or analyze_service_runtime_intent(model),
+        SHARE_BACKED_VOLUME_RUNTIME_DIAGNOSTICS,
+    )
 
 
 def _unsafe_share_backed_source(source):

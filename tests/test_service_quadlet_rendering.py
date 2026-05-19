@@ -3,6 +3,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fortress_inventory.model import load_inventory_tree
+from fortress_inventory.service_runtime_intent import (
+    ServiceRuntimeIntent,
+    ServiceSecretRuntimeFact,
+)
 from fortress_services.quadlet import render_quadlet_container, render_quadlet_service
 
 
@@ -347,6 +351,61 @@ class ServiceQuadletRenderingTests(unittest.TestCase):
             container.content,
         )
         self.assertNotIn("admin_password: ", container.content)
+
+    def test_container_service_secret_lines_use_service_runtime_intent_when_provided(self):
+        service = {
+            "name": "paperless",
+            "backend": {"vm": "media01", "port": 8000},
+            "deploy": {
+                "type": "quadlet",
+                "containers": [
+                    {
+                        "name": "web",
+                        "image": "ghcr.io/paperless-ngx/paperless-ngx:2.13.5",
+                        "secrets": [
+                            {
+                                "secret": "secrets.raw_yaml_password",
+                                "env": "RAW_YAML_PASSWORD_FILE",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+        runtime_intent = ServiceRuntimeIntent(
+            backends=(),
+            published_ports=(),
+            telemetry_targets=(),
+            service_secrets=(
+                ServiceSecretRuntimeFact(
+                    service_name="paperless",
+                    container_name="web",
+                    container_index=0,
+                    secret_index=0,
+                    secret_key="admin_password",
+                    podman_name="fortress_paperless_admin_password",
+                    env="PAPERLESS_ADMIN_PASSWORD_FILE",
+                    sops_extract='["secrets"]["admin_password"]["value"]',
+                    env_value_mode="file_path",
+                ),
+            ),
+            service_owned_volumes=(),
+            service_data_directories=(),
+            share_backed_volumes=(),
+            native_environment_secrets=(),
+            diagnostics=(),
+        )
+
+        rendered = render_quadlet_service(service, {}, runtime_intent=runtime_intent)
+
+        container = rendered.artifacts_by_filename["fortress-paperless-web.container"]
+        self.assertIn("Secret=fortress_paperless_admin_password\n", container.content)
+        self.assertIn(
+            "Environment=PAPERLESS_ADMIN_PASSWORD_FILE=/run/secrets/fortress_paperless_admin_password\n",
+            container.content,
+        )
+        self.assertNotIn("raw_yaml_password", container.content)
+        self.assertNotIn("RAW_YAML_PASSWORD_FILE", container.content)
 
     def test_container_dependencies_render_same_service_start_order_and_stop_coupling(self):
         service = {

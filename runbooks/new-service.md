@@ -70,11 +70,11 @@ curl -fsS https://<service>.fearn.cloud/
 
 ## Volumes
 
-Service-owned volume entries use `service_path` and mount a path under the Service Data Directory, `/srv/services/<service>/`. Fortress creates declared Service Data Directory paths during `service-deploy`; Service Data Directory cleanup/migration is explicit, and service-deploy never prunes /srv/services/<service>/.
+Service-owned volume entries use `service_path` and mount a path under the Service Data Directory, `/srv/services/<service>/`. Service Runtime Intent resolves the Service Data Directory facts; `service-deploy` creates those directories during deploy. Service Data Directory cleanup/migration is explicit, and service-deploy never prunes /srv/services/<service>/.
 
-Share-backed Volume entries use `mount`, `source`, and `container`. The `mount` value references an existing Backend VM Mount by name. Service yaml does not declare NAS Endpoint, Dataset, Share, or protocol details directly; those live on the VM and Dataset declarations that NAS Reconcile and VM Configure own.
+Share-backed Volume entries use `mount`, `source`, and `container`. The `mount` value references an existing Backend VM Mount by name. Service Runtime Intent resolves the Share-backed Volume facts that validation, Service Deploy, and Quadlet rendering consume. Service yaml does not declare NAS Endpoint, Dataset, Share, or protocol details directly; those live on the VM and Dataset declarations that NAS Reconcile and VM Configure own.
 
-Use `source: /` to mount the root of the existing Backend VM Mount, or a relative subpath such as `photos`. `service-deploy may validate Share-backed Volume subpaths`, but it does not run NAS Reconcile, does not create NAS Shares, and does not create VM Mount units.
+Use `source: /` to mount the root of the existing Backend VM Mount, or a relative subpath such as `photos`. `service-deploy` validates Share-backed Volume subpaths when needed, but it does not run NAS Reconcile, does not create NAS Shares, and does not create VM Mount units.
 
 ## Secrets And Fragments
 
@@ -91,6 +91,8 @@ secrets:
     version: 1
     value: "<secret bytes>"
 ```
+
+Service Runtime Intent owns the Service Secret and Native Service Environment Secret references, names, structured SOPS extraction paths, and diagnostics. Secret values, Podman secret installation, native environment files, rendered Quadlet lines, and Ansible variable names remain Service Deploy or renderer concerns.
 
 Quadlet Fragment files live under `inventory/services/<service>.quadlet.d/`. Use `network.network` for the generated network artifact or `<container>.container` for a generated container artifact. Fragments are for native Quadlet options fortress does not model directly; validation refuses unknown fragment files and fortress-owned invariants.
 

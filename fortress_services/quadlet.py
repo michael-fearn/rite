@@ -2,6 +2,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from pathlib import PurePosixPath
 
+from fortress_inventory.service_runtime_intent import (
+    service_runtime_intent_for_service,
+    service_secret_runtime_facts_for_service,
+)
+
 
 QUADLET_SYSTEM_PATH = "/etc/containers/systemd"
 ADDITIVE_FRAGMENT_KEYS = {
@@ -54,7 +59,13 @@ class RenderedQuadletService:
         return {artifact.filename: artifact for artifact in self.artifacts}
 
 
-def render_quadlet_service(service, vm, inventory_root=None):
+def render_quadlet_service(
+    service,
+    vm,
+    inventory_root=None,
+    service_data_directories=None,
+    runtime_intent=None,
+):
     network_name = _service_network_name(service)
     fragments = _quadlet_fragments(service, inventory_root)
     artifacts = [
@@ -73,23 +84,35 @@ def render_quadlet_service(service, vm, inventory_root=None):
             fragment_content=fragments.get("network.network"),
         )
     ]
-    for container in service["deploy"]["containers"]:
+    for container_index, container in enumerate(service["deploy"]["containers"]):
         runtime_name = _container_runtime_name(service, container)
         artifacts.append(
             _artifact_with_fragment(
                 filename=f"{runtime_name}.container",
-                content=render_quadlet_container(service, vm, container),
+                content=render_quadlet_container(
+                    service,
+                    vm,
+                    container,
+                    container_index=container_index,
+                    runtime_intent=runtime_intent,
+                ),
                 fragment_content=fragments.get(f"{container['name']}.container"),
             )
         )
     return RenderedQuadletService(
         artifacts=tuple(artifacts),
-        service_data_directories=tuple(_service_data_directories(service)),
+        service_data_directories=(
+            tuple(service_data_directories)
+            if service_data_directories is not None
+            else tuple(_service_data_directories(service))
+        ),
         service_data_files=tuple(_service_data_files(service)),
     )
 
 
-def render_quadlet_container(service, vm, container):
+def render_quadlet_container(service, vm, container, container_index=None, runtime_intent=None):
+    if container_index is None:
+        container_index = _container_index(service, container)
     mount_by_name = {
         mount.get("name"): mount
         for mount in vm.get("mounts", []) or []
@@ -121,20 +144,42 @@ def render_quadlet_container(service, vm, container):
     for name, value in (container.get("env") or {}).items():
         lines.append(f"Environment={name}={_quadlet_env_value(value)}")
 
-    for secret in container.get("secrets", []) or []:
-        secret_name = _service_secret_name(service, secret)
-        lines.append(f"Secret={secret_name}")
-        lines.append(f"Environment={secret['env']}={_service_secret_env_value(secret_name, secret)}")
+    service_secret_facts = _service_secret_facts_for_container(
+        service,
+        container_index,
+        runtime_intent=runtime_intent,
+    )
+    for secret_fact in service_secret_facts:
+        lines.append(f"Secret={secret_fact.podman_name}")
+        lines.append(
+            f"Environment={secret_fact.env}={_service_secret_env_value(secret_fact)}"
+        )
 
-    for volume in container.get("volumes", []) or []:
+    share_backed_volume_by_index = {}
+    if runtime_intent is not None:
+        service_intent = _service_runtime_intent_view(service, runtime_intent)
+        share_backed_volume_by_index = {
+            volume.volume_index: volume
+            for volume in service_intent.share_backed_volumes
+            if volume.container_index == container_index
+        }
+    for volume_index, volume in enumerate(container.get("volumes", []) or []):
         if volume.get("mount"):
-            mount = mount_by_name[volume["mount"]]
-            mount_unit = systemd_mount_unit_name(mount["mount_point"])
+            share_backed_volume = share_backed_volume_by_index.get(volume_index)
+            if share_backed_volume is not None:
+                source = share_backed_volume.resolved_source_path
+                mount_unit = share_backed_volume.required_mount_unit
+                mode = "ro" if share_backed_volume.access == "read_only" else "rw"
+            else:
+                mount = mount_by_name[volume["mount"]]
+                source = _share_backed_volume_source(mount, volume)
+                mount_unit = systemd_mount_unit_name(mount["mount_point"])
+                mode = _volume_mode(volume, mount)
             required_units.append(mount_unit)
             ordered_after_units.append(mount_unit)
             lines.append(
-                f"Volume={_share_backed_volume_source(mount, volume)}:"
-                f"{volume['container']}:{_volume_mode(volume, mount)}"
+                f"Volume={source}:"
+                f"{volume['container']}:{mode}"
             )
         else:
             lines.append(
@@ -154,6 +199,22 @@ def render_quadlet_container(service, vm, container):
 
     lines.extend(["", "[Install]", "WantedBy=multi-user.target"])
     return "\n".join(lines) + "\n"
+
+
+def _service_runtime_intent_view(service, runtime_intent):
+    return service_runtime_intent_for_service(runtime_intent, service["name"])
+
+
+def _service_secret_facts_for_container(service, container_index, runtime_intent=None):
+    if runtime_intent is not None:
+        service_secret_facts = _service_runtime_intent_view(service, runtime_intent).service_secrets
+    else:
+        service_secret_facts = service_secret_runtime_facts_for_service(service)
+    return [
+        secret_fact
+        for secret_fact in service_secret_facts
+        if secret_fact.container_index == container_index
+    ]
 
 
 def systemd_mount_unit_name(mount_point):
@@ -190,6 +251,16 @@ def _container_runtime_name(service, container):
     return f"fortress-{service['name']}-{container['name']}"
 
 
+def _container_index(service, selected_container):
+    for container_index, container in enumerate(service.get("deploy", {}).get("containers", []) or []):
+        if container is selected_container:
+            return container_index
+    for container_index, container in enumerate(service.get("deploy", {}).get("containers", []) or []):
+        if container == selected_container:
+            return container_index
+    return 0
+
+
 def _published_ports(published_port):
     bind = published_port.get("bind")
     host = published_port.get("host", published_port["container"])
@@ -211,21 +282,10 @@ def _quadlet_env_value(value):
     return str(value)
 
 
-def _service_secret_name(service, secret):
-    return f"fortress_{service['name']}_{_service_secret_key(secret)}"
-
-
-def _service_secret_env_value(secret_name, secret):
-    if secret.get("env_value") == "secret_name":
-        return secret_name
-    return f"/run/secrets/{secret_name}"
-
-
-def _service_secret_key(secret):
-    reference = secret["secret"]
-    if not reference.startswith("secrets."):
-        return reference
-    return reference.split(".", 1)[1]
+def _service_secret_env_value(secret_fact):
+    if secret_fact.env_value_mode == "secret_name":
+        return secret_fact.podman_name
+    return f"/run/secrets/{secret_fact.podman_name}"
 
 
 def _unique_units(units):

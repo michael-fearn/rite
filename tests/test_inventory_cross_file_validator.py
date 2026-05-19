@@ -1223,6 +1223,30 @@ class InventoryCrossFileValidatorTests(unittest.TestCase):
             self.assertIn("service_secret_reference_not_sibling_sops_secret", codes)
             self.assertIn("service_secret_env_not_file", codes)
 
+    def test_service_secret_name_env_value_mode_does_not_require_file_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURES / "inventory_valid", root, dirs_exist_ok=True)
+            (root / "inventory" / "services" / "immich.yaml").write_text(
+                "name: immich\n"
+                "backend:\n"
+                "  vm: media01\n"
+                "  port: 2283\n"
+                "deploy:\n"
+                "  type: quadlet\n"
+                "  containers:\n"
+                "    - name: server\n"
+                "      image: ghcr.io/immich-app/immich-server:v1.120.0\n"
+                "      secrets:\n"
+                "        - secret: secrets.db_password\n"
+                "          env: IMMICH_DB_PASSWORD_SECRET\n"
+                "          env_value: secret_name\n"
+            )
+
+            codes = {error.code for error in validate_inventory_tree(root)}
+
+            self.assertNotIn("service_secret_env_not_file", codes)
+
     def test_service_environment_names_must_not_conflict_with_secret_file_env_or_fragments(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

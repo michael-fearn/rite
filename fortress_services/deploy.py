@@ -4,6 +4,11 @@ from copy import deepcopy
 from pathlib import Path
 from pathlib import PurePosixPath
 
+from fortress_inventory.service_runtime_intent import (
+    analyze_service_runtime_intent,
+    service_runtime_intent_for_service,
+    service_secret_runtime_facts_for_service,
+)
 from fortress_services.observability_config import (
     GRAFANA_GENERATED_DASHBOARD_DIR,
     observability_service_data_files,
@@ -22,7 +27,15 @@ class NativeEnvironmentSecretPreflightError(ValueError):
     pass
 
 
-def share_backed_volume_subpaths(service, vm):
+def share_backed_volume_subpaths(service, vm, runtime_intent=None):
+    if runtime_intent is not None:
+        service_intent = _service_runtime_intent_view(service, runtime_intent)
+        return [
+            volume.resolved_source_path
+            for volume in service_intent.share_backed_volumes
+            if volume.resolved_source_path != volume.vm_mount_path
+        ]
+
     mount_by_name = {
         mount.get("name"): mount
         for mount in vm.get("mounts", []) or []
@@ -40,32 +53,44 @@ def share_backed_volume_subpaths(service, vm):
     return subpaths
 
 
-def service_secret_installations(service):
+def service_secret_installations(service, runtime_intent=None):
     installations = []
-    for secret_key in service_secret_keys(service):
+    for secret_key, secret_fact in _unique_service_secret_facts(service, runtime_intent=runtime_intent).items():
         installations.append(
             {
-                "podman_name": f"fortress_{service['name']}_{secret_key}",
-                "sops_extract": _sops_extract_path("secrets", secret_key, "value"),
+                "podman_name": secret_fact.podman_name,
+                "sops_extract": secret_fact.sops_extract,
             }
         )
     return installations
 
 
-def service_secret_keys(service):
-    keys = []
-    seen = set()
-    for container in service.get("deploy", {}).get("containers", []) or []:
-        for secret in container.get("secrets", []) or []:
-            secret_key = service_secret_key(secret)
-            if secret_key in seen:
-                continue
-            seen.add(secret_key)
-            keys.append(secret_key)
-    return keys
+def service_secret_keys(service, runtime_intent=None):
+    return list(_unique_service_secret_facts(service, runtime_intent=runtime_intent).keys())
 
 
-def native_environment_secret_specs(service):
+def _unique_service_secret_facts(service, runtime_intent=None):
+    facts = {}
+    if runtime_intent is not None:
+        service_secret_facts = _service_runtime_intent_view(service, runtime_intent).service_secrets
+    else:
+        service_secret_facts = service_secret_runtime_facts_for_service(service)
+    for secret_fact in service_secret_facts:
+        facts.setdefault(secret_fact.secret_key, secret_fact)
+    return facts
+
+
+def native_environment_secret_specs(service, runtime_intent=None):
+    facts = _native_environment_secret_facts(service, runtime_intent)
+    if facts is not None:
+        return [
+            {
+                "env": fact.env,
+                "sops_extract": fact.sops_extract,
+            }
+            for fact in facts
+        ]
+
     specs = []
     for secret in service.get("deploy", {}).get("environment_secrets", []) or []:
         secret_key = service_secret_key(secret)
@@ -78,7 +103,11 @@ def native_environment_secret_specs(service):
     return specs
 
 
-def native_environment_secret_keys(service):
+def native_environment_secret_keys(service, runtime_intent=None):
+    facts = _native_environment_secret_facts(service, runtime_intent)
+    if facts is not None:
+        return _unique_ordered(fact.secret_key for fact in facts)
+
     keys = []
     seen = set()
     for secret in service.get("deploy", {}).get("environment_secrets", []) or []:
@@ -88,6 +117,27 @@ def native_environment_secret_keys(service):
         seen.add(secret_key)
         keys.append(secret_key)
     return keys
+
+
+def _native_environment_secret_facts(service, runtime_intent):
+    if runtime_intent is None:
+        return None
+    return list(_service_runtime_intent_view(service, runtime_intent).native_environment_secrets)
+
+
+def _service_runtime_intent_view(service, runtime_intent):
+    return service_runtime_intent_for_service(runtime_intent, service["name"])
+
+
+def _unique_ordered(values):
+    unique = []
+    seen = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
 
 
 def preflight_service_secret_shape(service_name, service_sops_path, secret_keys):
@@ -149,9 +199,18 @@ def _preflight_structured_secret_shape(service_name, service_sops_path, secret_k
             )
 
 
-def quadlet_deploy_vars(service, vm, inventory_root=None, model=None):
+def quadlet_deploy_vars(service, vm, inventory_root=None, model=None, runtime_intent=None):
     service = _service_with_deploy_capability_setup(service)
-    rendered = render_quadlet_service(service, vm, inventory_root=inventory_root)
+    if runtime_intent is None and model is not None:
+        runtime_intent = analyze_service_runtime_intent(model)
+    runtime_directories = _runtime_service_data_directories(service, model, runtime_intent=runtime_intent)
+    rendered = render_quadlet_service(
+        service,
+        vm,
+        inventory_root=inventory_root,
+        service_data_directories=runtime_directories,
+        runtime_intent=runtime_intent,
+    )
     service_data_files = list(rendered.service_data_files)
     service_data_directories = list(rendered.service_data_directories)
     service_data_reconcile_directories = []
@@ -192,6 +251,21 @@ def quadlet_deploy_vars(service, vm, inventory_root=None, model=None):
         ],
         "fortress_service_secret_prefix": f"fortress_{service['name']}_",
     }
+
+
+def _runtime_service_data_directories(service, model, runtime_intent=None):
+    if runtime_intent is None and model is None:
+        return None
+    if runtime_intent is None:
+        runtime_intent = analyze_service_runtime_intent(model)
+    return tuple(
+        ServiceDataDirectory(
+            path=directory.path,
+            uid=directory.uid,
+            gid=directory.gid,
+        )
+        for directory in _service_runtime_intent_view(service, runtime_intent).service_data_directories
+    )
 
 
 def _with_service_data_file_parent_directories(directories, files):
@@ -244,7 +318,7 @@ def _needs_pihole_dnsmasq_d_compatibility(service):
     return dns.get("provider") == "pihole" and dns.get("ingress_records", {}).get("enabled") is True
 
 
-def native_deploy_vars(service, globals_, inventory_root=None):
+def native_deploy_vars(service, globals_, inventory_root=None, runtime_intent=None):
     deploy = service["deploy"]
     template_root = Path(inventory_root) / "services" / f"{service['name']}.native.d"
     apt_repo_name = deploy.get("apt_repo")
@@ -267,7 +341,10 @@ def native_deploy_vars(service, globals_, inventory_root=None):
             }
             for config_file in deploy.get("config_files", []) or []
         ],
-        "fortress_native_environment_secret_specs": native_environment_secret_specs(service),
+        "fortress_native_environment_secret_specs": native_environment_secret_specs(
+            service,
+            runtime_intent=runtime_intent,
+        ),
     }
 
 
