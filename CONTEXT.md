@@ -418,8 +418,64 @@ Proxmox Backup Server, deployed in this project as a VM on the `straylight` Host
 _Avoid_: PVE backup (a separate Proxmox feature).
 
 **Datastore**:
-PBS's storage location; an NFS Share from TrueNAS, mounted into the PBS VM.
+PBS storage location for backup snapshots.
 _Avoid_: backup pool.
+
+**Primary Datastore**:
+The NAS-backed Datastore used for normal Backup Targets and longer retention.
+_Avoid_: main backup pool, NAS backup folder.
+
+**Backup Run**:
+One PBS backup execution for one Backup Target.
+_Avoid_: backup policy, backup schedule.
+
+**Backup Job**:
+A PVE-side scheduled job for one Backup Target.
+_Avoid_: host backup group, PBS schedule.
+
+**Backup Configure**:
+The operator workflow that reconciles fortress-owned Backup Jobs.
+_Avoid_: host configure, PBS configure.
+
+**Backup Health**:
+The operator-facing status of Backup Runs and restore-point freshness for Backup Targets.
+_Avoid_: PBS status, backup logs.
+
+**Backup Readiness**:
+The pre-production gate that confirms a Backup Target's static backup declaration and live PBS prerequisites are usable.
+_Avoid_: backup health, service readiness.
+
+**Restore Drill**:
+A non-destructive rehearsal that proves a Backup Target can be restored and verified.
+_Avoid_: backup test, service test.
+
+**Restored Drill VM**:
+A disposable VM created by a Restore Drill from a Backup Target's restore point.
+_Avoid_: restore test VM, backup clone, acceptance VM.
+
+**Drill Network**:
+An isolated network used by Restored Drill VMs during Restore Drills.
+_Avoid_: test LAN, temporary production network.
+
+**Recovery Secret**:
+Secret material required to recover encrypted backups after workstation or VM loss.
+_Avoid_: backup password, restore token.
+
+**Backup Target**:
+A VM selected for PBS backup.
+_Avoid_: service backup, dataset backup target.
+
+**Unprotected VM**:
+A production VM explicitly excluded from PBS backup.
+_Avoid_: forgotten backup, disabled backup.
+
+**PBS Restore**:
+Recovery of a Backup Target to a bootable VM with its VM-local state.
+_Avoid_: service restore, dataset restore.
+
+**Backup Policy**:
+Schedule and retention rules for Backup Runs and restore points.
+_Avoid_: global backup cap, per-service retention.
 
 **NAS Endpoint**:
 A named external NAS system fortress can reconcile against.
@@ -743,6 +799,30 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - `dns-secondary` is both an **Ingress DNS Target** and an **Ingress**-enabled **Service** for its Pi-hole web UI.
 - Primary and secondary DNS **Services** receive the same generated **Ingress DNS Record Set** as peer **Ingress DNS Targets**.
 - **PBS** backs up every **VM** with `backup.enabled: true`; **PBS** itself is a **VM**.
+- **PBS** is not its own **Backup Target**.
+- **PBS** protects **VM** recoverability, not NAS-backed **Dataset** history.
+- PVE executes **Backup Runs** against the PBS **Primary Datastore**.
+- Each **Backup Target** has its own **Backup Job**.
+- A **Backup Job** has a deterministic name derived from its **Backup Target** and **Backup Policy**.
+- **Backup Jobs** are deterministically staggered from their **Backup Policy** time.
+- A **Backup Job** stagger offset is derived from its **Backup Target** identity.
+- Backup Job reconciliation prunes obsolete fortress-owned **Backup Jobs** and leaves manual PVE jobs alone.
+- Backup Job pruning is confirmation-gated.
+- **Backup Configure** owns **Backup Job** reconciliation.
+- **Backup Configure** is host-scoped, with fleet orchestration as iteration over Hosts.
+- A **Backup Configure** plan shows each **Backup Job**'s derived scheduled time.
+- **Backup Configure** helps establish live **Backup Readiness**.
+- **Backup Configure** may trigger an initial **Backup Run** only by explicit operator choice.
+- A **Backup Target** is always a **VM**.
+- An **Unprotected VM** must have an explicit reason.
+- Every production **VM** explicitly declares whether it is a **Backup Target** or an **Unprotected VM**.
+- Generated or disposable VMs are exempt from production backup declaration rules.
+- A **PBS Restore** does not by itself prove restored **Services** are healthy.
+- A **PBS Restore** does not promise point-in-time consistency with NAS-backed **Datasets**.
+- A **Backup Policy** applies per **Backup Target**, not across the fleet as a shared cap.
+- A **Backup Target** chooses a named **Backup Policy**.
+- A **VM** becomes a **Backup Target** only through explicit backup enablement; policy selection alone does not select it.
+- Declared **Backup Policies** are validatable even when unused.
 - A **NAS Endpoint** is an **Entity**.
 - A **NAS Endpoint** has zero or more **Datasets**.
 - A **NAS Endpoint** has exactly one **NAS Software Version**.
@@ -761,6 +841,7 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - **Service Launch** runs **VM Lifecycle Convergence** for the Service's **Backend** **VM** before **Service Deploy** and relies on that workflow to decide whether the **VM** is already ready.
 - **Service Launch** treats Host readiness as a prerequisite and does not run **Bootstrap** or **Host Configure**.
 - **Service Launch** treats NAS readiness as a prerequisite and does not run **NAS Reconcile**.
+- **Service Launch** treats **Backup Readiness** as a prerequisite for **Backup Targets** and does not run **Backup Configure**.
 - **Service Launch** treats **Ingress** infrastructure readiness as a prerequisite and does not launch **Ingress** or DNS **Services**.
 - **Service Launch** runs **Ingress Regeneration** after **Service Deploy** only when the **Service** declares **Ingress**.
 - **Service Launch** deploys only the named **Service**, even when other **Services** share its **Backend** **VM** or **Service Group**.
@@ -805,7 +886,23 @@ _Avoid_: permissions (too broad), ACL (too TrueNAS-specific).
 - Before a **VM Update** reboots a **VM**, it stops resident fortress-managed **Services** normally and treats failure to reach stopped state as requiring operator judgment.
 - After a **VM Update** reboots a **VM**, it restores the same resident fortress-managed **Services** it stopped before the reboot.
 - **Upgrade** is separate from **Update** because version-boundary changes may need compatibility checks, migrations, or explicit operator judgment.
-- A **Datastore** uses the same **Dataset**, **Share**, and **Mount** model as other NAS-backed storage.
+- A **Primary Datastore** uses the same **Dataset**, **Share**, and **Mount** model as other NAS-backed storage.
+- **Backup Health** is unhealthy when a default **Backup Target** has no successful Backup Run in the last 36 hours.
+- **Backup Health** is based first on PBS restore-point freshness.
+- **Backup Health** is evaluated per **Backup Target** and rolled up by Host and fleet.
+- An **Unprotected VM** appears in Backup Health reporting as excluded.
+- **Backup Readiness** gates production readiness for **Backup Targets**.
+- **Backup Readiness** requires valid policy, usable datastore path, encryption **Recovery Secret** availability, and at least one successful Backup Run.
+- A **Restore Drill** first proves each **Backup Policy** shape, then rotates through individual **Backup Targets**.
+- A **Restore Drill** must not collide with production VM identity or mutate production NAS-backed **Datasets**.
+- A **Restore Drill** proves recovery from backup reality; an **Acceptance Test** proves creation from declared intent.
+- A **Restored Drill VM** is disposable and not a production **VM**.
+- **Restored Drill VM** placement is selected for the **Restore Drill**.
+- A **Restored Drill VM** uses a **Drill Network** by default.
+- A **Restored Drill VM** may contain restored production secrets and is operator-only.
+- A **Restore Drill** destroys its **Restored Drill VM** unless the operator explicitly keeps it for failure diagnosis.
+- The PBS encryption key is a **Recovery Secret**.
+- A **Restore Drill** may verify **Recovery Secret** availability without exposing the secret to normal service paths.
 - A **Dataset** declaration includes the NAS endpoint it belongs to.
 - A **Dataset** declaration includes an explicit `lifecycle`.
 - **Dataset** `lifecycle` is `adopted` or `ephemeral`.
